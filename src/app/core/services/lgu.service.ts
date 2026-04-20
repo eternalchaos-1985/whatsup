@@ -14,6 +14,40 @@ export interface PSGCProvince { code: string; name: string; regionCode: string; 
 export interface PSGCCity { code: string; name: string; isCity: boolean; isMunicipality: boolean; regionCode: string; provinceCode: string | false; }
 export interface PSGCBarangay { code: string; name: string; }
 
+export interface SearchLocation {
+  lat: number;
+  lng: number;
+  displayName: string;
+  type: string;
+  barangay: string | null;
+  city: string | null;
+  province: string | null;
+  region: string | null;
+  psgcCode: string | null;
+  isCity: boolean;
+}
+
+export interface SearchResponse {
+  locations: SearchLocation[];
+  officials?: LGUOfficial[];
+}
+
+export interface DilgBarangay {
+  barangay: string;
+  officialCount: number;
+  chairman: string | null;
+}
+
+export interface DilgBarangayListResponse {
+  barangays: DilgBarangay[];
+  count: number;
+}
+
+export interface DilgOfficialsResponse {
+  officials: LGUOfficial[];
+  count: number;
+}
+
 @Injectable({ providedIn: 'root' })
 export class LGUService {
   private readonly http = inject(HttpClient);
@@ -35,6 +69,12 @@ export class LGUService {
     const params: Record<string, string> = { lat: lat.toString(), lng: lng.toString() };
     if (radiusKm != null) params['radius'] = radiusKm.toString();
     return this.http.get<Facility[]>(`${this.apiUrl}/facilities`, { params });
+  }
+
+  searchLocations(query: string): Observable<SearchResponse> {
+    return this.http.get<SearchResponse>(`${this.apiUrl}/search`, {
+      params: { query },
+    });
   }
 
   searchByAddress(query: string): Observable<LGUByLocationResponse> {
@@ -67,6 +107,18 @@ export class LGUService {
 
   getBarangays(cityMunCode: string): Observable<PSGCBarangay[]> {
     return this.http.get<PSGCBarangay[]>(`${this.apiUrl}/barangays/${cityMunCode}`);
+  }
+
+  getDilgBarangays(city: string, region: string): Observable<DilgBarangayListResponse> {
+    return this.http.get<DilgBarangayListResponse>(`${this.apiUrl}/dilg/barangays`, {
+      params: { city, region },
+    });
+  }
+
+  getDilgOfficials(region: string, city: string, barangay: string): Observable<DilgOfficialsResponse> {
+    return this.http.get<DilgOfficialsResponse>(`${this.apiUrl}/dilg/officials`, {
+      params: { region, city, barangay },
+    });
   }
 
   getLevels(): Observable<Record<string, string[]>> {

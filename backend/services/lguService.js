@@ -5,6 +5,7 @@
  *   - PSGC API (PSA)    → geographic hierarchy (Region → Province → City → Barangay)
  *   - Wikidata SPARQL    → elected officials (mayors, governors)
  *   - Curated COMELEC    → verified fallback officials for Metro Manila + major cities
+ *   - DILG BIS          → barangay officials masterlist (Punong Barangay, Kagawad, SK)
  *   - Overpass (OSM)     → nearby facilities (police, fire, hospital, clinic)
  *   - Nominatim (OSM)    → forward/reverse geocoding
  *   - Firebase Firestore → community-contributed data (optional, stubs when unavailable)
@@ -15,6 +16,7 @@ const NodeCache = require('node-cache');
 const { db } = require('../firebaseConfig');
 const psgc = require('./psgcService');
 const officialsService = require('./officialsService');
+const dilgService = require('./dilgService');
 
 const cache = new NodeCache({ stdTTL: 3600 });
 const UA = { 'User-Agent': 'WhatsUp-CivicPlatform/1.0' };
@@ -34,6 +36,54 @@ const SERVICE_TYPES = {
   hospital: { icon: '🏥', label: 'Hospital' },
   clinic: { icon: '🩺', label: 'Health Center / Clinic' },
 };
+
+// ─── Curated Emergency Service Contacts ───
+
+const EMERGENCY_CONTACTS = {
+  national: [
+    { id: 'nat-911', type: 'emergency', name: 'National Emergency Hotline', phone: '911', area: 'Philippines' },
+    { id: 'nat-ndrrmc', type: 'emergency', name: 'NDRRMC Operations Center', phone: '(02) 8911-5061', area: 'Philippines' },
+    { id: 'nat-redcross', type: 'emergency', name: 'Philippine Red Cross', phone: '143', area: 'Philippines' },
+    { id: 'nat-pnp', type: 'police', name: 'PNP Hotline', phone: '117', area: 'Philippines' },
+    { id: 'nat-bfp', type: 'fire_station', name: 'Bureau of Fire Protection', phone: '(02) 8426-0219', area: 'Philippines' },
+    { id: 'nat-doh', type: 'hospital', name: 'DOH Hotline', phone: '1555', area: 'Philippines' },
+  ],
+  cities: {
+    'Manila': [
+      { id: 'mnl-drrmo', type: 'emergency', name: 'Manila DRRMO', phone: '(02) 8527-3875', area: 'Manila' },
+      { id: 'mnl-mpd', type: 'police', name: 'Manila Police District', phone: '(02) 8524-5765', area: 'Manila' },
+      { id: 'mnl-bfp', type: 'fire_station', name: 'Manila Fire District', phone: '(02) 8527-3653', area: 'Manila' },
+    ],
+    'Quezon City': [
+      { id: 'qc-drrmo', type: 'emergency', name: 'QC DRRMO', phone: '(02) 8988-7928', area: 'Quezon City' },
+      { id: 'qc-pd', type: 'police', name: 'QCPD', phone: '(02) 8921-5844', area: 'Quezon City' },
+    ],
+    'Makati': [
+      { id: 'mkt-drrmo', type: 'emergency', name: 'Makati DRRMO', phone: '(02) 8870-1925', area: 'Makati' },
+      { id: 'mkt-pd', type: 'police', name: 'Makati Police', phone: '(02) 8899-8961', area: 'Makati' },
+    ],
+    'Cebu City': [
+      { id: 'ceb-cdrrmo', type: 'emergency', name: 'Cebu City DRRMO', phone: '(032) 253-1261', area: 'Cebu City' },
+    ],
+    'Davao City': [
+      { id: 'dvo-911', type: 'emergency', name: 'Davao 911 Central', phone: '(082) 227-3566', area: 'Davao City' },
+    ],
+  },
+};
+
+function getEmergencyContacts(cityName) {
+  const contacts = [...EMERGENCY_CONTACTS.national];
+  if (cityName) {
+    const normalised = cityName.replace(/^City of\s+/i, '');
+    for (const [key, cityContacts] of Object.entries(EMERGENCY_CONTACTS.cities)) {
+      if (key.toLowerCase() === normalised.toLowerCase() || key.toLowerCase() === cityName.toLowerCase()) {
+        contacts.push(...cityContacts);
+        break;
+      }
+    }
+  }
+  return contacts;
+}
 
 // ─── Core: Get By Coordinates ───
 
@@ -76,20 +126,24 @@ async function getOfficialsByCoords(lat, lng) {
   };
 
   // Step 3: Fetch officials and facilities in parallel
+  const regionCode = psgcInfo?.psgcCode ? String(psgcInfo.psgcCode).substring(0, 2) : null;
   const [cityOfficials, barangayOfficials, facilities, barangayList] = await Promise.all([
     cityName ? officialsService.getOfficialsForCity(cityName) : Promise.resolve([]),
-    barangayName ? getBarangayOfficials(barangayName) : Promise.resolve([]),
+    getBarangayOfficials(barangayName, cityName, regionCode),
     getNearbyFacilities(lat, lng),
     psgcInfo?.psgcCode ? psgc.getBarangays(psgcInfo.psgcCode).catch(() => []) : Promise.resolve([]),
   ]);
+
+  const emergencyContacts = getEmergencyContacts(cityName);
 
   const result = {
     area: areaInfo,
     barangayOfficials,
     cityOfficials,
     facilities,
+    emergencyContacts,
     psgcBarangayCount: barangayList.length || null,
-    dataSources: ['PSGC (PSA)', 'Wikidata', 'COMELEC 2025', 'OpenStreetMap'],
+    dataSources: ['PSGC (PSA)', 'DILG BIS', 'Wikidata', 'COMELEC 2025', 'OpenStreetMap'],
     timestamp: new Date().toISOString(),
   };
 
@@ -97,7 +151,63 @@ async function getOfficialsByCoords(lat, lng) {
   return result;
 }
 
-// ─── Core: Search by Address Text ───
+// ─── Core: Search Locations (multi-result) ───
+
+/**
+ * Search for matching locations in the Philippines.
+ * Returns a list of up to 10 candidate locations with PSGC enrichment.
+ */
+async function searchLocations(query) {
+  const cacheKey = `lgu-locations-${query.toLowerCase()}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+
+  // Forward geocode with Nominatim — get multiple results
+  const geoResponse = await axios.get('https://nominatim.openstreetmap.org/search', {
+    params: {
+      q: query + ', Philippines',
+      format: 'json',
+      'accept-language': 'en',
+      addressdetails: 1,
+      limit: 10,
+      countrycodes: 'ph',
+    },
+    headers: UA,
+    timeout: 10000,
+  });
+
+  if (!geoResponse.data?.length) return [];
+
+  // Enrich each result with PSGC info
+  const locations = await Promise.all(
+    geoResponse.data.map(async (place) => {
+      const addr = place.address || {};
+      const cityName = addr.city || addr.town || addr.municipality || null;
+      let psgcInfo = null;
+      try {
+        psgcInfo = await psgc.resolvePSGCFromAddress(addr);
+      } catch { /* PSGC slow — proceed */ }
+
+      return {
+        lat: parseFloat(place.lat),
+        lng: parseFloat(place.lon),
+        displayName: place.display_name,
+        type: place.type,
+        barangay: addr.suburb || addr.neighbourhood || addr.village || null,
+        city: cityName,
+        province: addr.state || addr.county || null,
+        region: psgcInfo?.regionName || null,
+        psgcCode: psgcInfo?.psgcCode || null,
+        isCity: psgcInfo?.isCity || false,
+      };
+    })
+  );
+
+  cache.set(cacheKey, locations);
+  return locations;
+}
+
+// ─── Core: Search by Address Text (single result, auto-drill) ───
 
 /**
  * Geocode a text query → coordinates → full lookup.
@@ -139,9 +249,19 @@ async function getOfficials(areaName, areaType = 'barangay') {
   return getBarangayOfficials(areaName);
 }
 
-// ─── Barangay Officials (Firebase community data) ───
+// ─── Barangay Officials (DILG BIS + Firebase fallback) ───
 
-async function getBarangayOfficials(barangayName) {
+async function getBarangayOfficials(barangayName, cityName, regionCode) {
+  // Try DILG BIS first (real data from government masterlist)
+  try {
+    const dilgOfficials = await dilgService.getBarangayOfficials(barangayName, cityName, regionCode);
+    if (dilgOfficials.length > 0) return dilgOfficials;
+  } catch (err) {
+    console.error('[LGU] DILG lookup failed, falling back to Firebase:', err.message);
+  }
+
+  // Fall back to Firebase community data
+  if (!barangayName) return [];
   try {
     const snapshot = await db.collection('lgu_officials')
       .where('area', '==', barangayName)
@@ -247,6 +367,7 @@ module.exports = {
   getProvinces,
   getCitiesMunicipalities,
   getBarangays,
+  searchLocations,
   OFFICIAL_LEVELS,
   SERVICE_TYPES,
 };

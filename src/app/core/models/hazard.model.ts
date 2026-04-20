@@ -223,11 +223,20 @@ export interface Facility {
   operator?: string | null;
 }
 
+export interface EmergencyContact {
+  id: string;
+  type: 'police' | 'fire_station' | 'hospital' | 'clinic' | 'emergency';
+  name: string;
+  phone: string;
+  area: string;
+}
+
 export interface LGUByLocationResponse {
   area: AreaInfo;
   barangayOfficials: LGUOfficial[];
   cityOfficials: LGUOfficial[];
   facilities: Facility[];
+  emergencyContacts: EmergencyContact[];
   psgcBarangayCount: number | null;
   dataSources: string[];
   timestamp: string;

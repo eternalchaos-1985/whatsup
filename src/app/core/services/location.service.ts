@@ -1,10 +1,16 @@
 import { Injectable, signal, computed } from '@angular/core';
 import { GeoLocation } from '../models/hazard.model';
 
+export type LocationScope = 'local' | 'philippines' | 'global';
+
 @Injectable({ providedIn: 'root' })
 export class LocationService {
+  static readonly PH_CENTER: GeoLocation = { lat: 12.8797, lng: 121.7740, name: 'Philippines' };
+  static readonly MAX_RADIUS = 20037;
+
   readonly currentLocation = signal<GeoLocation | null>(null);
   readonly radius = signal<number>(10);
+  readonly scope = signal<LocationScope>('local');
   readonly isLoading = signal<boolean>(false);
   readonly error = signal<string | null>(null);
 
@@ -51,7 +57,24 @@ export class LocationService {
   }
 
   setRadius(km: number): void {
-    this.radius.set(Math.max(1, Math.min(50, km)));
+    this.radius.set(Math.max(1, Math.min(LocationService.MAX_RADIUS, km)));
+  }
+
+  setScope(newScope: LocationScope): void {
+    this.scope.set(newScope);
+    if (newScope === 'philippines') {
+      this.currentLocation.set({ ...LocationService.PH_CENTER });
+      this.radius.set(2000);
+    } else if (newScope === 'global') {
+      if (!this.currentLocation()) {
+        this.currentLocation.set({ ...LocationService.PH_CENTER });
+      }
+      this.radius.set(LocationService.MAX_RADIUS);
+    } else if (newScope === 'local') {
+      if (this.radius() > 500) {
+        this.radius.set(10);
+      }
+    }
   }
 
   private getGeolocationError(error: GeolocationPositionError): string {

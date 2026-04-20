@@ -1,17 +1,18 @@
 import { Component, inject, signal, computed, OnInit, OnDestroy, ChangeDetectionStrategy, ElementRef, viewChild, afterNextRender } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { LocationService } from '../../core/services/location.service';
+import { LocationService, LocationScope } from '../../core/services/location.service';
 import { HazardService } from '../../core/services/hazard.service';
 import { FireService } from '../../core/services/fire.service';
 import { CommunityService } from '../../core/services/community.service';
 import { UtilityService } from '../../core/services/utility.service';
+import { LGUService } from '../../core/services/lgu.service';
 import {
   HazardAlert, EarthquakeEvent, FireIncident, NewsArticle,
-  CommunityEvent, UtilityNewsReport
+  CommunityEvent, UtilityNewsReport, LGUOfficial, Facility, EmergencyContact
 } from '../../core/models/hazard.model';
 import * as L from 'leaflet';
 
-type LayerKey = 'hazards' | 'earthquakes' | 'fire' | 'news' | 'events' | 'utilities';
+type LayerKey = 'hazards' | 'earthquakes' | 'fire' | 'news' | 'events' | 'utilities' | 'officials';
 
 interface MapLayer {
   key: LayerKey;
@@ -43,22 +44,35 @@ interface SidePanelItem {
   template: `
     <div class="h-screen flex flex-col relative">
       <!-- Header -->
-      <header class="bg-white shadow-sm px-4 py-3 flex items-center gap-3 z-20">
+      <header class="bg-white shadow-sm px-4 py-3 flex items-center gap-2 z-20 flex-wrap">
         <h2 class="font-semibold text-lg shrink-0">Map</h2>
-        <div class="flex items-center gap-2 ml-auto">
-          <label for="map-radius" class="text-sm text-gray-600 hidden sm:inline">Radius:</label>
-          <input id="map-radius" type="range" [min]="1" [max]="50"
-            [value]="locationService.radius()" (input)="onRadiusChange($event)"
-            class="w-20 sm:w-24" aria-label="Map radius in kilometers" />
-          <span class="text-sm font-medium w-12">{{ locationService.radius() }} km</span>
-          <button (click)="panelOpen.set(!panelOpen())"
-            class="ml-2 p-2 rounded-lg border border-gray-300 hover:bg-gray-100 lg:hidden"
-            [attr.aria-expanded]="panelOpen()" aria-label="Toggle side panel">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
-            </svg>
-          </button>
+        <!-- Scope selector -->
+        <div class="flex items-center gap-1">
+          @for (s of scopes; track s.key) {
+            <button (click)="setScope(s.key)"
+              [class]="'px-2 py-1 rounded-full text-xs font-medium border transition-colors ' +
+                (locationService.scope() === s.key ? s.activeClass : 'text-gray-600 border-gray-300 hover:bg-gray-50')">
+              {{ s.icon }} {{ s.label }}
+            </button>
+          }
         </div>
+        <!-- Radius (non-global scopes) -->
+        @if (locationService.scope() !== 'global') {
+          <div class="flex items-center gap-2 ml-auto">
+            <label for="map-radius" class="text-sm text-gray-600 hidden sm:inline">Radius:</label>
+            <input id="map-radius" type="range" [min]="0" [max]="100"
+              [value]="radiusSliderValue()" (input)="onRadiusSlider($event)"
+              class="w-20 sm:w-28" aria-label="Map radius in kilometers" />
+            <span class="text-sm font-medium w-20 text-right">{{ formatRadius() }}</span>
+          </div>
+        }
+        <button (click)="panelOpen.set(!panelOpen())"
+          [class]="'p-2 rounded-lg border border-gray-300 hover:bg-gray-100 lg:hidden' + (locationService.scope() === 'global' ? ' ml-auto' : ' ml-2')"
+          [attr.aria-expanded]="panelOpen()" aria-label="Toggle side panel">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+          </svg>
+        </button>
       </header>
 
       <!-- Layer toggle strip -->
@@ -82,6 +96,13 @@ interface SidePanelItem {
       <div class="flex-1 flex overflow-hidden relative">
         <!-- Map -->
         <div #mapContainer class="flex-1" role="application" aria-label="Hazard map"></div>
+
+        <!-- Click hint for local scope -->
+        @if (locationService.scope() === 'local') {
+          <div class="absolute top-2 left-2 bg-white/90 backdrop-blur-sm text-xs text-gray-600 px-3 py-1.5 rounded-lg shadow-sm z-30 pointer-events-none flex items-center gap-1.5">
+            <span class="text-base">📍</span> Click map to set center
+          </div>
+        }
 
         <!-- Side panel (desktop: always visible, mobile: slide-over) -->
         <aside [class]="'flex flex-col bg-white border-l shadow-lg z-30 transition-transform duration-300 ' +
@@ -158,6 +179,7 @@ export class MapComponent implements OnInit, OnDestroy {
   private readonly fireService = inject(FireService);
   private readonly communityService = inject(CommunityService);
   private readonly utilityService = inject(UtilityService);
+  private readonly lguService = inject(LGUService);
 
   private readonly mapEl = viewChild.required<ElementRef>('mapContainer');
 
@@ -173,6 +195,7 @@ export class MapComponent implements OnInit, OnDestroy {
     news: L.layerGroup(),
     events: L.layerGroup(),
     utilities: L.layerGroup(),
+    officials: L.layerGroup(),
   };
 
   readonly loading = signal(false);
@@ -187,9 +210,22 @@ export class MapComponent implements OnInit, OnDestroy {
     { key: 'news', label: 'News', icon: '📰', color: '#8b5cf6', active: false },
     { key: 'events', label: 'Community', icon: '👥', color: '#06b6d4', active: false },
     { key: 'utilities', label: 'Utilities', icon: '⚡', color: '#eab308', active: false },
+    { key: 'officials', label: 'Officials', icon: '🏛️', color: '#4f46e5', active: false },
   ]);
 
   readonly anyLayerActive = signal(false);
+
+  readonly scopes = [
+    { key: 'local' as LocationScope, icon: '📍', label: 'Local', activeClass: 'bg-blue-600 text-white border-blue-600' },
+    { key: 'philippines' as LocationScope, icon: '🇵🇭', label: 'Philippines', activeClass: 'bg-green-600 text-white border-green-600' },
+    { key: 'global' as LocationScope, icon: '🌍', label: 'Global', activeClass: 'bg-purple-600 text-white border-purple-600' },
+  ];
+
+  readonly radiusSliderValue = computed(() => {
+    const r = this.locationService.radius();
+    if (r <= 1) return 0;
+    return Math.round(100 * Math.log(r) / Math.log(LocationService.MAX_RADIUS));
+  });
 
   focusItem(item: SidePanelItem): void {
     if (item.lat != null && item.lng != null && this.map) {
@@ -223,7 +259,7 @@ export class MapComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
-    if (!this.locationService.hasLocation()) {
+    if (this.locationService.scope() === 'local' && !this.locationService.hasLocation()) {
       this.locationService.detectLocation().then(() => this.onLocationReady()).catch(() => {});
     }
   }
@@ -232,11 +268,42 @@ export class MapComponent implements OnInit, OnDestroy {
     this.map?.remove();
   }
 
-  onRadiusChange(event: Event): void {
+  onRadiusSlider(event: Event): void {
     const value = parseInt((event.target as HTMLInputElement).value, 10);
-    this.locationService.setRadius(value);
+    const radius = Math.max(1, Math.round(Math.pow(LocationService.MAX_RADIUS, value / 100)));
+    this.locationService.setRadius(radius);
     this.updateRadiusCircle();
     this.refreshActiveLayers();
+  }
+
+  setScope(scope: LocationScope): void {
+    this.locationService.setScope(scope);
+
+    if (scope === 'global') {
+      if (this.userMarker) this.map?.removeLayer(this.userMarker);
+      if (this.radiusCircle) { this.map?.removeLayer(this.radiusCircle); this.radiusCircle = null; }
+      this.map?.setView([20, 0], 2);
+    } else if (scope === 'philippines') {
+      const ph = LocationService.PH_CENTER;
+      this.placeUserMarker(ph.lat, ph.lng);
+      this.updateRadiusCircle();
+    } else {
+      const loc = this.locationService.currentLocation();
+      if (loc) {
+        this.placeUserMarker(loc.lat, loc.lng);
+        this.updateRadiusCircle();
+      }
+    }
+
+    if (this.map) {
+      this.map.getContainer().style.cursor = scope === 'local' ? 'crosshair' : '';
+    }
+
+    this.refreshActiveLayers();
+  }
+
+  formatRadius(): string {
+    return this.locationService.radius().toLocaleString() + ' km';
   }
 
   toggleLayer(key: LayerKey): void {
@@ -261,12 +328,25 @@ export class MapComponent implements OnInit, OnDestroy {
   // ── Map setup ──
 
   private initMap(): void {
+    const scope = this.locationService.scope();
     const loc = this.locationService.currentLocation();
-    const center: L.LatLngExpression = loc ? [loc.lat, loc.lng] : [14.5995, 120.9842];
+    let center: L.LatLngExpression;
+    let zoom: number;
+
+    if (scope === 'global') {
+      center = [20, 0];
+      zoom = 2;
+    } else if (scope === 'philippines') {
+      center = [LocationService.PH_CENTER.lat, LocationService.PH_CENTER.lng];
+      zoom = 6;
+    } else {
+      center = loc ? [loc.lat, loc.lng] : [14.5995, 120.9842];
+      zoom = 11;
+    }
 
     this.map = L.map(this.mapEl().nativeElement, {
       center,
-      zoom: 11,
+      zoom,
       zoomControl: true,
     });
 
@@ -275,7 +355,20 @@ export class MapComponent implements OnInit, OnDestroy {
       maxZoom: 19,
     }).addTo(this.map);
 
-    if (loc) {
+    // Click to set center (local scope only)
+    this.map.on('click', (e: L.LeafletMouseEvent) => {
+      if (this.locationService.scope() !== 'local') return;
+      this.locationService.setManualLocation(e.latlng.lat, e.latlng.lng, 'Selected Location');
+      this.placeUserMarker(e.latlng.lat, e.latlng.lng);
+      this.updateRadiusCircle();
+      this.refreshActiveLayers();
+    });
+
+    if (scope === 'local') {
+      this.map.getContainer().style.cursor = 'crosshair';
+    }
+
+    if (scope !== 'global' && loc) {
       this.placeUserMarker(loc.lat, loc.lng);
       this.updateRadiusCircle();
     }
@@ -299,10 +392,12 @@ export class MapComponent implements OnInit, OnDestroy {
   }
 
   private updateRadiusCircle(): void {
-    const loc = this.locationService.currentLocation();
-    if (!loc || !this.map) return;
+    if (!this.map) return;
+    if (this.radiusCircle) { this.map.removeLayer(this.radiusCircle); this.radiusCircle = null; }
+    if (this.locationService.scope() === 'global') return;
 
-    if (this.radiusCircle) this.map.removeLayer(this.radiusCircle);
+    const loc = this.locationService.currentLocation();
+    if (!loc) return;
 
     this.radiusCircle = L.circle([loc.lat, loc.lng], {
       radius: this.locationService.radius() * 1000,
@@ -333,6 +428,7 @@ export class MapComponent implements OnInit, OnDestroy {
       case 'news': this.loadNews(); break;
       case 'events': this.loadEvents(); break;
       case 'utilities': this.loadUtilities(); break;
+      case 'officials': this.loadOfficials(); break;
     }
   }
 
@@ -431,7 +527,7 @@ export class MapComponent implements OnInit, OnDestroy {
   private loadFire(): void {
     const loc = this.locationService.currentLocation();
     const params: any = {};
-    if (loc) {
+    if (this.locationService.scope() !== 'global' && loc) {
       params.lat = loc.lat;
       params.lng = loc.lng;
       params.radius = this.locationService.radius();
@@ -614,6 +710,68 @@ export class MapComponent implements OnInit, OnDestroy {
 
         this.layerCounts.update(c => ({ ...c, utilities: count }));
         this.panelItems.update(prev => [...prev.filter(i => i.layer !== 'utilities'), ...items]);
+        this.loading.set(false);
+      },
+      error: () => this.loading.set(false),
+    });
+  }
+
+  private loadOfficials(): void {
+    const loc = this.locationService.currentLocation();
+    if (!loc) { this.loading.set(false); return; }
+    this.lguService.getByLocation(loc.lat, loc.lng).subscribe({
+      next: (data) => {
+        const group = this.layerGroups['officials'];
+        group.clearLayers();
+        let count = 0;
+        const items: SidePanelItem[] = [];
+
+        // Officials markers
+        for (const official of [...data.cityOfficials, ...data.barangayOfficials]) {
+          count++;
+          items.push({
+            id: official.id,
+            layer: 'officials',
+            icon: '🏛️',
+            color: '#4f46e5',
+            title: official.name,
+            subtitle: `${official.position} · ${official.area}`,
+            detail: official.phone ? `📞 ${official.phone}` : undefined,
+            lat: loc.lat,
+            lng: loc.lng,
+          });
+        }
+
+        // Facility markers with actual coordinates
+        for (const fac of data.facilities) {
+          if (fac.lat == null || fac.lng == null) continue;
+          const facIcon = fac.type === 'police' ? '👮' : fac.type === 'fire_station' ? '🚒' : fac.type === 'hospital' ? '🏥' : '🩺';
+          L.marker([fac.lat, fac.lng], {
+            icon: this.createDivIcon(facIcon, '#4f46e5'),
+          }).bindPopup(
+            `<div class="text-sm"><b>${facIcon} ${fac.name}</b>` +
+            (fac.address ? `<br><span class="text-xs text-gray-500">${fac.address}</span>` : '') +
+            (fac.phone ? `<br><a href="tel:${fac.phone}" class="text-blue-600 text-xs">📞 ${fac.phone}</a>` : '') +
+            `</div>`
+          ).addTo(group);
+        }
+
+        // Summary marker at center
+        if (count > 0) {
+          L.marker([loc.lat, loc.lng + 0.003], {
+            icon: this.createDivIcon('🏛️', '#4f46e5'),
+          }).bindPopup(
+            `<div class="text-sm max-h-48 overflow-y-auto">` +
+            `<div class="font-bold mb-1">🏛️ ${data.area.city || data.area.barangay || 'Local'} Officials (${count})</div>` +
+            [...data.cityOfficials, ...data.barangayOfficials].slice(0, 6).map(o =>
+              `<div class="border-b pb-1 mb-1"><b>${o.name}</b><br><span class="text-xs text-gray-500">${o.position}</span></div>`
+            ).join('') +
+            `</div>`
+          ).addTo(group);
+        }
+
+        this.layerCounts.update(c => ({ ...c, officials: count }));
+        this.panelItems.update(prev => [...prev.filter(i => i.layer !== 'officials'), ...items]);
         this.loading.set(false);
       },
       error: () => this.loading.set(false),

@@ -2,7 +2,7 @@ import { Component, inject, signal, ChangeDetectionStrategy, OnInit } from '@ang
 import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { HazardService } from '../../core/services/hazard.service';
-import { LocationService } from '../../core/services/location.service';
+import { LocationService, LocationScope } from '../../core/services/location.service';
 import { NotificationService } from '../../core/services/notification.service';
 import { NearbyHazardsResponse } from '../../core/models/hazard.model';
 
@@ -35,31 +35,52 @@ import { NearbyHazardsResponse } from '../../core/models/hazard.model';
       <!-- Location Bar -->
       <div class="bg-white shadow-sm border-b">
         <div class="max-w-7xl mx-auto px-4 py-3 flex items-center gap-4 flex-wrap">
-          <button
-            (click)="detectLocation()"
-            class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
-            [disabled]="locationService.isLoading()"
-            [attr.aria-busy]="locationService.isLoading()">
-            @if (locationService.isLoading()) {
-              Detecting...
-            } @else {
-              📍 Detect Location
-            }
-          </button>
-
-          <div class="flex items-center gap-2">
-            <label for="radius-slider" class="text-sm text-gray-600">Radius:</label>
-            <input
-              id="radius-slider"
-              type="range"
-              [min]="1"
-              [max]="50"
-              [value]="locationService.radius()"
-              (input)="onRadiusChange($event)"
-              class="w-32"
-              aria-label="Search radius in kilometers" />
-            <span class="text-sm font-medium text-gray-700">{{ locationService.radius() }} km</span>
+          <!-- Scope selector -->
+          <div class="flex items-center gap-1">
+            <button (click)="setScope('local')"
+              [class]="'px-2.5 py-1.5 rounded-full text-xs font-medium border transition-colors ' +
+                (locationService.scope() === 'local' ? 'bg-blue-600 text-white border-blue-600' : 'text-gray-600 border-gray-300 hover:bg-gray-50')">
+              📍 Local
+            </button>
+            <button (click)="setScope('philippines')"
+              [class]="'px-2.5 py-1.5 rounded-full text-xs font-medium border transition-colors ' +
+                (locationService.scope() === 'philippines' ? 'bg-green-600 text-white border-green-600' : 'text-gray-600 border-gray-300 hover:bg-gray-50')">
+              🇵🇭 Philippines
+            </button>
+            <button (click)="setScope('global')"
+              [class]="'px-2.5 py-1.5 rounded-full text-xs font-medium border transition-colors ' +
+                (locationService.scope() === 'global' ? 'bg-purple-600 text-white border-purple-600' : 'text-gray-600 border-gray-300 hover:bg-gray-50')">
+              🌍 Global
+            </button>
           </div>
+
+          @if (locationService.scope() === 'local') {
+            <button
+              (click)="detectLocation()"
+              class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500"
+              [disabled]="locationService.isLoading()"
+              [attr.aria-busy]="locationService.isLoading()">
+              @if (locationService.isLoading()) {
+                Detecting...
+              } @else {
+                📍 Detect Location
+              }
+            </button>
+
+            <div class="flex items-center gap-2">
+              <label for="radius-slider" class="text-sm text-gray-600">Radius:</label>
+              <input
+                id="radius-slider"
+                type="range"
+                [min]="1"
+                [max]="50"
+                [value]="locationService.radius()"
+                (input)="onRadiusChange($event)"
+                class="w-32"
+                aria-label="Search radius in kilometers" />
+              <span class="text-sm font-medium text-gray-700">{{ locationService.radius() }} km</span>
+            </div>
+          }
 
           @if (locationService.currentLocation(); as loc) {
             <span class="text-sm text-gray-500">
@@ -220,7 +241,12 @@ export class DashboardComponent implements OnInit {
   readonly isLoading = signal(false);
 
   ngOnInit(): void {
-    this.detectLocation();
+    if (this.locationService.scope() === 'local') {
+      this.detectLocation();
+    } else {
+      const loc = this.locationService.currentLocation();
+      if (loc) this.loadHazardData(loc.lat, loc.lng);
+    }
   }
 
   async detectLocation(): Promise<void> {
@@ -235,6 +261,14 @@ export class DashboardComponent implements OnInit {
   onRadiusChange(event: Event): void {
     const value = parseInt((event.target as HTMLInputElement).value, 10);
     this.locationService.setRadius(value);
+    const loc = this.locationService.currentLocation();
+    if (loc) {
+      this.loadHazardData(loc.lat, loc.lng);
+    }
+  }
+
+  setScope(scope: LocationScope): void {
+    this.locationService.setScope(scope);
     const loc = this.locationService.currentLocation();
     if (loc) {
       this.loadHazardData(loc.lat, loc.lng);
