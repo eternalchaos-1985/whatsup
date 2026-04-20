@@ -127,7 +127,7 @@ import { LGUByLocationResponse, LGUOfficial, Facility, EmergencyContact } from '
 
             <!-- Filter input for large lists -->
             @if (barangayList().length > 20) {
-              <input type="text" [(ngModel)]="barangayFilter"
+              <input type="text" [ngModel]="barangayFilter()" (ngModelChange)="barangayFilter.set($event)"
                      placeholder="Filter barangays..."
                      class="w-full border rounded-lg px-3 py-2 text-sm mb-3 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                      aria-label="Filter barangays" />
@@ -154,9 +154,9 @@ import { LGUByLocationResponse, LGUOfficial, Facility, EmergencyContact } from '
               }
             </div>
 
-            @if (filteredBarangays().length === 0 && barangayFilter) {
+            @if (filteredBarangays().length === 0 && barangayFilter()) {
               <div class="text-center py-6 text-sm text-gray-400">
-                No barangays matching "{{ barangayFilter }}"
+                No barangays matching "{{ barangayFilter() }}"
               </div>
             }
           </div>
@@ -472,11 +472,11 @@ export class OfficialsComponent implements OnInit {
 
   readonly barangayList = signal<DilgBarangay[]>([]);
   readonly selectedLocation = signal<SearchLocation | null>(null);
-  barangayFilter = '';
+  readonly barangayFilter = signal('');
 
   readonly filteredBarangays = computed(() => {
     const list = this.barangayList();
-    const filter = this.barangayFilter.toLowerCase().trim();
+    const filter = this.barangayFilter().toLowerCase().trim();
     if (!filter) return list;
     return list.filter(b => b.barangay.toLowerCase().includes(filter));
   });
@@ -528,7 +528,7 @@ export class OfficialsComponent implements OnInit {
     this.locationResults.set([]);
     this.barangayList.set([]);
     this.selectedLocation.set(null);
-    this.barangayFilter = '';
+    this.barangayFilter.set('');
     this.lguService.searchLocations(query).subscribe({
       next: (result) => {
         if (result.locations?.length) {
@@ -586,7 +586,7 @@ export class OfficialsComponent implements OnInit {
     if (!loc) return;
 
     this.barangayList.set([]);
-    this.barangayFilter = '';
+    this.barangayFilter.set('');
     this.isLoading.set(true);
 
     const regionCode = loc.psgcCode?.substring(0, 2) || '';
@@ -616,14 +616,14 @@ export class OfficialsComponent implements OnInit {
     const loc = this.selectedLocation();
     if (!loc) return;
     this.barangayList.set([]);
-    this.barangayFilter = '';
+    this.barangayFilter.set('');
     this.isLoading.set(true);
     this.loadByLocation(loc.lat, loc.lng);
   }
 
   goBackToLocations(): void {
     this.barangayList.set([]);
-    this.barangayFilter = '';
+    this.barangayFilter.set('');
     this.selectedLocation.set(null);
     // Re-trigger last search to show location picker again
     if (this.searchQuery.trim()) {

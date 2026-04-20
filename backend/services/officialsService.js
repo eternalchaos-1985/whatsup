@@ -1,17 +1,220 @@
 /**
- * Officials Service — Philippine Elected Officials via Wikidata SPARQL
- * Source: Wikidata (query.wikidata.org) — free, no API key.
+ * Officials Service — Philippine Elected Officials
  *
- * Provides: Current mayors, vice-mayors, governors, congress members.
- * Supplemented by curated fallback data for Metro Manila + major provincial cities.
+ * Primary source: DILG Consolidated Directory of LGU Elective Officials (Google Sheets)
+ *   - 17,000+ officials: mayors, vice-mayors, governors, vice-governors, sanggunian members
+ *   - Term 2025-2028, updated February 2026
+ *
+ * Fallback: Wikidata SPARQL (for cities missing from DILG list)
  */
 
+const https = require('https');
 const axios = require('axios');
 const NodeCache = require('node-cache');
 
 const SPARQL_ENDPOINT = 'https://query.wikidata.org/sparql';
 const cache = new NodeCache({ stdTTL: 43200 }); // 12h cache
 const UA = { 'User-Agent': 'WhatsUp-CivicPlatform/1.0', Accept: 'application/sparql-results+json' };
+
+// Google Sheets CSV export URL for DILG elective officials directory
+const DILG_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1B2N5SjZEBP-29tUioFHaSk-6R_1YFGcYIkSPjuApxZw/gviz/tq?tqx=out:csv&gid=1213553854';
+
+// ─── CSV Parsing ───
+
+function parseCSVLine(line) {
+  const result = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === ',' && !inQuotes) {
+      result.push(current.trim());
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  result.push(current.trim());
+  return result;
+}
+
+function fetchCSV(url) {
+  return new Promise((resolve, reject) => {
+    const request = (u) => {
+      https.get(u, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          return request(res.headers.location);
+        }
+        let data = '';
+        res.on('data', (chunk) => data += chunk);
+        res.on('end', () => resolve(data));
+        res.on('error', reject);
+      }).on('error', reject);
+    };
+    request(url);
+  });
+}
+
+// ─── DILG Elective Officials from Google Sheets ───
+
+/**
+ * Fetch and parse the full DILG elective officials directory.
+ * Returns array of { region, province, cityMun, position, name, phone, email, address, source }.
+ * Cached for 24h.
+ */
+async function fetchDILGElectiveOfficials() {
+  const cached = cache.get('dilg-elective');
+  if (cached) return cached;
+
+  console.log('[DILG-Elective] Downloading officials directory...');
+  const csv = await fetchCSV(DILG_SHEET_URL);
+  const lines = csv.split('\n').filter(l => l.trim());
+
+  // Skip title row + header row
+  // Row 0: "CONSOLIDATED LIST..."
+  // Row 1: "REGION","PROVINCE","CITY/MUNICIPALITY","POSITION",...
+  const officials = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cols = parseCSVLine(lines[i]);
+    const region = cols[0] || '';
+    const position = cols[3] || '';
+
+    // Skip header rows that appear mid-data
+    if (region === 'REGION' || position === 'POSITION' || !region || !position) continue;
+
+    const firstName = (cols[5] || '').trim();
+    const middleName = (cols[6] || '').replace(/^N\/A$/i, '').trim();
+    const lastName = (cols[7] || '').trim();
+    const suffix = (cols[8] || '').replace(/^N\/A$/i, '').trim();
+
+    if (!lastName && !firstName) continue;
+
+    const nameParts = [firstName, middleName, lastName].filter(Boolean);
+    const fullName = suffix ? `${nameParts.join(' ')} ${suffix}` : nameParts.join(' ');
+
+    officials.push({
+      region,
+      province: cols[1] || '',
+      cityMun: cols[2] || '',
+      position: normalizePosition(position),
+      name: fullName,
+      phone: normalizePhone(cols[10]),
+      email: (cols[11] || '').trim() || null,
+      address: (cols[9] || '').trim() || null,
+      source: 'dilg-directory',
+    });
+  }
+
+  console.log(`[DILG-Elective] Parsed ${officials.length} officials`);
+  cache.set('dilg-elective', officials, 86400); // 24h
+  return officials;
+}
+
+function normalizePosition(raw) {
+  const map = {
+    'CITY MAYOR': 'City Mayor',
+    'CITY VICE-MAYOR': 'City Vice-Mayor',
+    'MUNICIPAL MAYOR': 'Municipal Mayor',
+    'MUNICIPAL VICE-MAYOR': 'Municipal Vice-Mayor',
+    'PROVINCIAL GOVERNOR': 'Provincial Governor',
+    'PROVINCIAL VICE-GOVERNOR': 'Provincial Vice-Governor',
+    'SANGGUNIANG PANLUNGSOD MEMBER': 'City Councilor',
+    'SANGGUNIANG BAYAN MEMBER': 'Municipal Councilor',
+    'SANGGUNIANG PANLALAWIGAN MEMBER': 'Provincial Board Member',
+  };
+  return map[raw.toUpperCase()] || raw;
+}
+
+function normalizePhone(raw) {
+  if (!raw) return null;
+  const cleaned = raw.trim().replace(/^0+$/, '');
+  return cleaned || null;
+}
+
+/**
+ * Get all elective officials for a specific city/municipality.
+ * Returns officials sorted by position hierarchy (Mayor → Vice Mayor → Councilors).
+ */
+async function getElectiveOfficialsForCity(cityName, regionName) {
+  const all = await fetchDILGElectiveOfficials();
+  const normalCity = cityName.toLowerCase().trim();
+
+  let matches = all.filter(o => {
+    const cm = o.cityMun.toLowerCase();
+    // Match "CITY OF MANILA" ↔ "Manila", "MANILA" ↔ "City of Manila"
+    return cm === normalCity ||
+      cm.replace(/^city of\s+/i, '').replace(/^municipality of\s+/i, '') === normalCity ||
+      normalCity.includes(cm.replace(/^city of\s+/i, '').replace(/^municipality of\s+/i, '')) ||
+      cm.includes(normalCity);
+  });
+
+  // If region specified, narrow results
+  if (regionName && matches.length > 10) {
+    const normalRegion = regionName.toLowerCase();
+    const regionFiltered = matches.filter(o =>
+      o.region.toLowerCase().includes(normalRegion) || normalRegion.includes(o.region.toLowerCase())
+    );
+    if (regionFiltered.length > 0) matches = regionFiltered;
+  }
+
+  // Sort by position hierarchy
+  const posOrder = {
+    'Provincial Governor': 0, 'Provincial Vice-Governor': 1, 'Provincial Board Member': 2,
+    'City Mayor': 3, 'City Vice-Mayor': 4, 'City Councilor': 5,
+    'Municipal Mayor': 6, 'Municipal Vice-Mayor': 7, 'Municipal Councilor': 8,
+  };
+
+  return matches
+    .sort((a, b) => (posOrder[a.position] ?? 99) - (posOrder[b.position] ?? 99))
+    .map((o, i) => ({
+      id: `dilg-elect-${normalCity}-${i}`,
+      name: o.name,
+      position: o.position,
+      level: o.position.includes('Provincial') ? 'provincial' : o.position.includes('Municipal') ? 'municipal' : 'city',
+      area: o.cityMun,
+      phone: o.phone,
+      email: o.email,
+      address: o.address,
+      source: o.source,
+    }));
+}
+
+/**
+ * Get provincial officials (governor, vice-governor, board members).
+ */
+async function getProvincialOfficials(provinceName) {
+  const all = await fetchDILGElectiveOfficials();
+  const normalProv = provinceName.toLowerCase().trim();
+
+  const matches = all.filter(o => {
+    const pos = o.position;
+    if (pos !== 'Provincial Governor' && pos !== 'Provincial Vice-Governor' && pos !== 'Provincial Board Member') return false;
+    const prov = o.province.toLowerCase();
+    return prov === normalProv || prov.includes(normalProv) || normalProv.includes(prov);
+  });
+
+  const posOrder = { 'Provincial Governor': 0, 'Provincial Vice-Governor': 1, 'Provincial Board Member': 2 };
+
+  return matches
+    .sort((a, b) => (posOrder[a.position] ?? 99) - (posOrder[b.position] ?? 99))
+    .map((o, i) => ({
+      id: `dilg-prov-${normalProv}-${i}`,
+      name: o.name,
+      position: o.position,
+      level: 'provincial',
+      area: o.province,
+      phone: o.phone,
+      email: o.email,
+      source: o.source,
+    }));
+}
 
 // ─── Wikidata SPARQL Queries ───
 
