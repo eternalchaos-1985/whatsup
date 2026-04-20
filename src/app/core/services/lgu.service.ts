@@ -8,11 +8,12 @@ import {
   CivicRepresentatives,
   OfficialLevel,
 } from '../models/hazard.model';
+import { environment } from '../../../environments/environment';
 
 @Injectable({ providedIn: 'root' })
 export class LGUService {
   private readonly http = inject(HttpClient);
-  private readonly apiUrl = '/api/lgu';
+  private readonly apiUrl = `${environment.apiBaseUrl}/api/lgu`;
 
   getOfficials(area: string, level: OfficialLevel = 'barangay'): Observable<LGUOfficial[]> {
     return this.http.get<LGUOfficial[]>(`${this.apiUrl}/officials`, {

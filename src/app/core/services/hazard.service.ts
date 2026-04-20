@@ -8,11 +8,12 @@ import {
   AirQualityData,
   HazardAlert,
 } from '../models/hazard.model';
+import { environment } from '../../../environments/environment';
 
 @Injectable({ providedIn: 'root' })
 export class HazardService {
   private readonly http = inject(HttpClient);
-  private readonly apiUrl = '/api/hazards';
+  private readonly apiUrl = `${environment.apiBaseUrl}/api/hazards`;
 
   getAll(): Observable<{ weather: WeatherData; seismic: SeismicData; timestamp: string }> {
     return this.http.get<{ weather: WeatherData; seismic: SeismicData; timestamp: string }>(this.apiUrl);

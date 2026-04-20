@@ -2,11 +2,12 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { NewsArticle, CommunityEvent } from '../models/hazard.model';
+import { environment } from '../../../environments/environment';
 
 @Injectable({ providedIn: 'root' })
 export class CommunityService {
   private readonly http = inject(HttpClient);
-  private readonly apiUrl = '/api/community';
+  private readonly apiUrl = `${environment.apiBaseUrl}/api/community`;
 
   getEvents(lat: number, lng: number, radius: number): Observable<CommunityEvent[]> {
     return this.http.get<CommunityEvent[]>(`${this.apiUrl}/events`, {

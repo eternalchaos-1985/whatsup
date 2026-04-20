@@ -6,11 +6,12 @@ import {
   NotificationStatus,
   NotificationTopic,
 } from '../models/hazard.model';
+import { environment } from '../../../environments/environment';
 
 @Injectable({ providedIn: 'root' })
 export class NotificationService {
   private readonly http = inject(HttpClient);
-  private readonly apiUrl = '/api/notifications';
+  private readonly apiUrl = `${environment.apiBaseUrl}/api/notifications`;
 
   /** The FCM device token once registered. */
   readonly fcmToken = signal<string | null>(null);

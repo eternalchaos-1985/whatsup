@@ -2,11 +2,12 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { EmergencyHotline } from '../models/hazard.model';
+import { environment } from '../../../environments/environment';
 
 @Injectable({ providedIn: 'root' })
 export class EmergencyService {
   private readonly http = inject(HttpClient);
-  private readonly apiUrl = '/api/emergency';
+  private readonly apiUrl = `${environment.apiBaseUrl}/api/emergency`;
 
   getHotlines(category?: string): Observable<EmergencyHotline[]> {
     return this.http.get<EmergencyHotline[]>(`${this.apiUrl}/hotlines`, {

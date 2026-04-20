@@ -6,11 +6,12 @@ import {
   UtilityAdvisoryResponse,
   UtilityType,
 } from '../models/hazard.model';
+import { environment } from '../../../environments/environment';
 
 @Injectable({ providedIn: 'root' })
 export class UtilityService {
   private readonly http = inject(HttpClient);
-  private readonly apiUrl = '/api/utilities';
+  private readonly apiUrl = `${environment.apiBaseUrl}/api/utilities`;
 
   getAll(location?: string): Observable<AllUtilityAdvisoriesResponse> {
     return this.http.get<AllUtilityAdvisoriesResponse>(this.apiUrl, {
