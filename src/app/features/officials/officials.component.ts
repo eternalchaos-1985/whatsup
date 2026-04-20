@@ -257,11 +257,19 @@ import { LGUByLocationResponse, LGUOfficial, Facility } from '../../core/models/
             </section>
           }
         } @else if (!isLoading()) {
-          <div class="text-center py-12">
-            <p class="text-5xl mb-4">🏛️</p>
-            <p class="text-gray-500">Tap <strong>Use My Location</strong> or search by area to find local government officials.</p>
-            <p class="text-sm text-gray-400 mt-2">See your barangay chairman, city mayor, police precincts, fire stations & health centers — all in one place.</p>
-          </div>
+          @if (searchFailed()) {
+            <div class="text-center py-12">
+              <p class="text-5xl mb-4">🔍</p>
+              <p class="text-gray-600">No results found for <strong>"{{ searchFailed() }}"</strong></p>
+              <p class="text-sm text-gray-400 mt-2">Try searching for a city, municipality, or barangay name (e.g. "Makati", "Quezon City", "Davao").</p>
+            </div>
+          } @else {
+            <div class="text-center py-12">
+              <p class="text-5xl mb-4">🏡️</p>
+              <p class="text-gray-500">Tap <strong>Use My Location</strong> or search by area to find local government officials.</p>
+              <p class="text-sm text-gray-400 mt-2">See your barangay chairman, city mayor, police precincts, fire stations & health centers — all in one place.</p>
+            </div>
+          }
         }
       </div>
     </div>
@@ -274,6 +282,7 @@ export class OfficialsComponent implements OnInit {
   readonly data = signal<LGUByLocationResponse | null>(null);
   readonly searchResults = signal<LGUOfficial[]>([]);
   readonly isLoading = signal(false);
+  readonly searchFailed = signal<string | null>(null);
   readonly activeTab = signal('all');
 
   searchQuery = '';
@@ -302,22 +311,27 @@ export class OfficialsComponent implements OnInit {
   }
 
   onSearch(): void {
-    if (!this.searchQuery.trim()) return;
+    const query = this.searchQuery.trim();
+    if (!query) return;
     this.isLoading.set(true);
     this.searchResults.set([]);
-    // Try address-based geocode search first (returns full location data)
-    this.lguService.searchByAddress(this.searchQuery.trim()).subscribe({
-      next: (result) => {
+    this.searchFailed.set(null);
+    this.data.set(null);
+    this.lguService.searchByAddress(query).subscribe({
+      next: (result: any) => {
         if (result && result.area) {
-          // Got a geocoded location result — show full area data
           this.data.set(result);
-        } else if (result && (result as any).officials) {
-          // Fallback: name/position search returned officials array
-          this.searchResults.set((result as any).officials);
+        } else if (result && result.officials?.length) {
+          this.searchResults.set(result.officials);
+        } else {
+          this.searchFailed.set(query);
         }
         this.isLoading.set(false);
       },
-      error: () => this.isLoading.set(false),
+      error: () => {
+        this.searchFailed.set(query);
+        this.isLoading.set(false);
+      },
     });
   }
 
@@ -344,6 +358,8 @@ export class OfficialsComponent implements OnInit {
 
   private loadByLocation(lat: number, lng: number): void {
     this.isLoading.set(true);
+    this.searchFailed.set(null);
+    this.searchResults.set([]);
     this.lguService.getByLocation(lat, lng).subscribe({
       next: (result) => {
         this.data.set(result);
