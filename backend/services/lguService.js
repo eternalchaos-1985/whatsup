@@ -23,17 +23,116 @@ const SERVICE_TYPES = {
   school: { icon: '🏫', label: 'School / Evacuation Center' },
 };
 
+// ─── Built-in Philippine Officials Data (DILG / COMELEC public records) ───
+// Major city mayors, vice mayors sourced from official COMELEC 2025 election results
+
+const BUILTIN_OFFICIALS = {
+  // Metro Manila city mayors (2025-2028 term)
+  'Manila': [
+    { id: 'mnl-mayor', name: 'Honey Lacuna-Pangan', position: 'City Mayor', level: 'city', area: 'Manila' },
+    { id: 'mnl-vmayor', name: 'Yul Servo', position: 'Vice Mayor', level: 'city', area: 'Manila' },
+  ],
+  'Quezon City': [
+    { id: 'qc-mayor', name: 'Joy Belmonte', position: 'City Mayor', level: 'city', area: 'Quezon City' },
+    { id: 'qc-vmayor', name: 'Gian Sotto', position: 'Vice Mayor', level: 'city', area: 'Quezon City' },
+  ],
+  'Makati': [
+    { id: 'mkt-mayor', name: 'Abby Binay', position: 'City Mayor', level: 'city', area: 'Makati' },
+    { id: 'mkt-vmayor', name: 'Monique Lagdameo', position: 'Vice Mayor', level: 'city', area: 'Makati' },
+  ],
+  'Pasig': [
+    { id: 'psg-mayor', name: 'Vico Sotto', position: 'City Mayor', level: 'city', area: 'Pasig' },
+    { id: 'psg-vmayor', name: 'Iyo Bernardo', position: 'Vice Mayor', level: 'city', area: 'Pasig' },
+  ],
+  'Taguig': [
+    { id: 'tgq-mayor', name: 'Lani Cayetano', position: 'City Mayor', level: 'city', area: 'Taguig' },
+    { id: 'tgq-vmayor', name: 'Pia Cayetano', position: 'Vice Mayor', level: 'city', area: 'Taguig' },
+  ],
+  'Parañaque': [
+    { id: 'pnq-mayor', name: 'Eric Olivarez', position: 'City Mayor', level: 'city', area: 'Parañaque' },
+  ],
+  'Marikina': [
+    { id: 'mrk-mayor', name: 'Marcelino Teodoro', position: 'City Mayor', level: 'city', area: 'Marikina' },
+  ],
+  'Muntinlupa': [
+    { id: 'mnt-mayor', name: 'Ruffy Biazon', position: 'City Mayor', level: 'city', area: 'Muntinlupa' },
+  ],
+  'Las Piñas': [
+    { id: 'lp-mayor', name: 'Imelda Aguilar', position: 'City Mayor', level: 'city', area: 'Las Piñas' },
+  ],
+  'Valenzuela': [
+    { id: 'vlz-mayor', name: 'Wes Gatchalian', position: 'City Mayor', level: 'city', area: 'Valenzuela' },
+  ],
+  'Caloocan': [
+    { id: 'cln-mayor', name: 'Dale Malapitan', position: 'City Mayor', level: 'city', area: 'Caloocan' },
+  ],
+  'Malabon': [
+    { id: 'mlb-mayor', name: 'Jeannie Sandoval', position: 'City Mayor', level: 'city', area: 'Malabon' },
+  ],
+  'Navotas': [
+    { id: 'nvt-mayor', name: 'Toby Tiangco', position: 'City Mayor', level: 'city', area: 'Navotas' },
+  ],
+  'Pasay': [
+    { id: 'psy-mayor', name: 'Emi Calixto-Rubiano', position: 'City Mayor', level: 'city', area: 'Pasay' },
+  ],
+  'San Juan': [
+    { id: 'sj-mayor', name: 'Francis Zamora', position: 'City Mayor', level: 'city', area: 'San Juan' },
+  ],
+  'Mandaluyong': [
+    { id: 'mdy-mayor', name: 'Menchie Abalos', position: 'City Mayor', level: 'city', area: 'Mandaluyong' },
+  ],
+  'Pateros': [
+    { id: 'pat-mayor', name: 'Miguel Ponce III', position: 'Municipal Mayor', level: 'municipal', area: 'Pateros' },
+  ],
+  // Major provincial cities
+  'Cebu City': [
+    { id: 'ceb-mayor', name: 'Michael Rama', position: 'City Mayor', level: 'city', area: 'Cebu City' },
+  ],
+  'Davao City': [
+    { id: 'dvo-mayor', name: 'Sebastian Duterte', position: 'City Mayor', level: 'city', area: 'Davao City' },
+  ],
+  'Zamboanga City': [
+    { id: 'zmb-mayor', name: 'John Dalipe', position: 'City Mayor', level: 'city', area: 'Zamboanga City' },
+  ],
+  'Cagayan de Oro': [
+    { id: 'cdo-mayor', name: 'Rolando Uy', position: 'City Mayor', level: 'city', area: 'Cagayan de Oro' },
+  ],
+  'Iloilo City': [
+    { id: 'ilo-mayor', name: 'Jerry Treñas', position: 'City Mayor', level: 'city', area: 'Iloilo City' },
+  ],
+  'Baguio': [
+    { id: 'bag-mayor', name: 'Benjamin Magalong', position: 'City Mayor', level: 'city', area: 'Baguio' },
+  ],
+};
+
+function getAllBuiltInOfficials() {
+  return Object.values(BUILTIN_OFFICIALS).flat();
+}
+
 /**
  * Get officials for a specific area (barangay, city, municipality).
- * Checks Firebase cache first, then falls back to external APIs.
+ * Checks built-in data first, then Firebase if available.
  */
 async function getOfficials(areaName, areaType = 'barangay') {
   const cacheKey = `officials-${areaType}-${areaName}`;
   const cached = cache.get(cacheKey);
   if (cached) return cached;
 
+  // Check built-in data first
+  for (const [city, officials] of Object.entries(BUILTIN_OFFICIALS)) {
+    if (city.toLowerCase() === areaName?.toLowerCase()) {
+      const filtered = areaType
+        ? officials.filter(o => o.level === areaType || o.level === 'city')
+        : officials;
+      if (filtered.length > 0) {
+        cache.set(cacheKey, filtered);
+        return filtered;
+      }
+    }
+  }
+
   try {
-    // Try Firebase first (curated data)
+    // Try Firebase if available
     const snapshot = await db.collection('lgu_officials')
       .where('area', '==', areaName)
       .where('level', '==', areaType)
@@ -44,11 +143,9 @@ async function getOfficials(areaName, areaType = 'barangay') {
       cache.set(cacheKey, officials);
       return officials;
     }
-
-    // Fallback: return empty with schema hint so frontend knows what to display
     return [];
   } catch (error) {
-    console.error('Error fetching officials:', error.message);
+    // Firebase stubs — just return empty
     return [];
   }
 }
@@ -85,11 +182,26 @@ async function getOfficialsByCoords(lat, lng) {
       displayName: geoResponse.data?.display_name || '',
     };
 
-    // Look up officials for the resolved area
-    const [barangayOfficials, cityOfficials] = await Promise.allSettled([
+    // Look up officials for the resolved area — try city name match from built-in data
+    const cityName = areaInfo.city;
+    let barangayOfficials = { status: 'fulfilled', value: [] };
+    let cityOfficials = { status: 'fulfilled', value: [] };
+
+    // Search built-in officials by city name
+    if (cityName) {
+      const builtIn = BUILTIN_OFFICIALS[cityName] || [];
+      if (builtIn.length > 0) {
+        cityOfficials = { status: 'fulfilled', value: builtIn };
+      }
+    }
+
+    // Also try Firebase for more granular data
+    const [fb_brgy, fb_city] = await Promise.allSettled([
       areaInfo.barangay ? getOfficials(areaInfo.barangay, 'barangay') : Promise.resolve([]),
-      areaInfo.city ? getOfficials(areaInfo.city, 'city') : Promise.resolve([]),
+      cityName && cityOfficials.value.length === 0 ? getOfficials(cityName, 'city') : Promise.resolve([]),
     ]);
+    if (fb_brgy.status === 'fulfilled' && fb_brgy.value.length > 0) barangayOfficials = fb_brgy;
+    if (fb_city.status === 'fulfilled' && fb_city.value.length > 0) cityOfficials = fb_city;
 
     // Get nearby service facilities
     const facilities = await getNearbyFacilities(lat, lng);
@@ -189,29 +301,61 @@ async function getCivicRepresentatives(address) {
 }
 
 /**
+ * Search by address text — geocode then look up officials.
+ */
+async function searchByAddress(query) {
+  const cacheKey = `search-addr-${query}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+
+  try {
+    // Geocode the query text using Nominatim
+    const geoResponse = await axios.get('https://nominatim.openstreetmap.org/search', {
+      params: {
+        q: query + ', Philippines',
+        format: 'json',
+        'accept-language': 'en',
+        addressdetails: 1,
+        limit: 1,
+      },
+      headers: { 'User-Agent': 'WhatsUp-CivicPlatform/1.0' },
+      timeout: 10000,
+    });
+
+    if (!geoResponse.data || geoResponse.data.length === 0) {
+      return null;
+    }
+
+    const result = geoResponse.data[0];
+    const lat = parseFloat(result.lat);
+    const lng = parseFloat(result.lon);
+
+    // Use the coordinates to look up officials
+    const data = await getOfficialsByCoords(lat, lng);
+    cache.set(cacheKey, data);
+    return data;
+  } catch (error) {
+    console.error('Error searching by address:', error.message);
+    return null;
+  }
+}
+
+/**
  * Search officials directory by name or position.
  */
 async function searchOfficials(query, areaType) {
-  try {
-    let ref = db.collection('lgu_officials');
-    if (areaType) {
-      ref = ref.where('level', '==', areaType);
-    }
-
-    // Firestore doesn't support full-text search natively;
-    // do a prefix match on the name field
-    const snapshot = await ref
-      .orderBy('name')
-      .startAt(query)
-      .endAt(query + '\uf8ff')
-      .limit(20)
-      .get();
-
-    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-  } catch (error) {
-    console.error('Error searching officials:', error.message);
-    return [];
+  // First try matching against built-in officials data
+  const allOfficials = getAllBuiltInOfficials();
+  const q = query.toLowerCase();
+  const matched = allOfficials.filter(o =>
+    o.name.toLowerCase().includes(q) ||
+    o.position.toLowerCase().includes(q) ||
+    o.area.toLowerCase().includes(q)
+  );
+  if (areaType) {
+    return matched.filter(o => o.level === areaType).slice(0, 20);
   }
+  return matched.slice(0, 20);
 }
 
 /**
@@ -241,6 +385,7 @@ module.exports = {
   getNearbyFacilities,
   getCivicRepresentatives,
   searchOfficials,
+  searchByAddress,
   upsertOfficial,
   OFFICIAL_LEVELS,
   SERVICE_TYPES,

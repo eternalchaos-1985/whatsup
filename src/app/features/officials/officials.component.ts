@@ -287,9 +287,17 @@ export class OfficialsComponent implements OnInit {
   onSearch(): void {
     if (!this.searchQuery.trim()) return;
     this.isLoading.set(true);
-    this.lguService.searchOfficials(this.searchQuery.trim()).subscribe({
-      next: (results) => {
-        this.searchResults.set(results);
+    this.searchResults.set([]);
+    // Try address-based geocode search first (returns full location data)
+    this.lguService.searchByAddress(this.searchQuery.trim()).subscribe({
+      next: (result) => {
+        if (result && result.area) {
+          // Got a geocoded location result — show full area data
+          this.data.set(result);
+        } else if (result && (result as any).officials) {
+          // Fallback: name/position search returned officials array
+          this.searchResults.set((result as any).officials);
+        }
         this.isLoading.set(false);
       },
       error: () => this.isLoading.set(false),

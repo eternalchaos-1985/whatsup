@@ -61,14 +61,23 @@ router.get('/civic', async (req, res) => {
 });
 
 // GET /api/lgu/search?query=...&level=...
+// Supports address geocoding: if query looks like an address/place, geocode it first
 router.get('/search', async (req, res) => {
   try {
     const { query, level } = req.query;
     if (!query) {
       return res.status(400).json({ error: 'query parameter is required' });
     }
+
+    // Try address-based search first (geocode the query)
+    const addressResult = await lguService.searchByAddress(query);
+    if (addressResult) {
+      return res.json(addressResult);
+    }
+
+    // Fall back to name/position search
     const results = await lguService.searchOfficials(query, level);
-    res.json(results);
+    res.json({ officials: results, facilities: [] });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

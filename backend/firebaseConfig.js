@@ -10,23 +10,38 @@ let auth = null;
 let messaging = null;
 
 if (projectId && clientEmail && privateKey) {
-  if (!admin.apps.length) {
-    admin.initializeApp({
-      credential: admin.credential.cert({ projectId, clientEmail, privateKey }),
-    });
+  try {
+    if (!admin.apps.length) {
+      admin.initializeApp({
+        credential: admin.credential.cert({ projectId, clientEmail, privateKey }),
+      });
+    }
+    db = admin.firestore();
+    auth = admin.auth();
+    messaging = admin.messaging();
+    console.log('[Firebase] Initialized with project:', projectId);
+  } catch (initError) {
+    console.warn('[Firebase] Failed to initialize:', initError.message, '— running with stubs.');
   }
-  db = admin.firestore();
-  auth = admin.auth();
-  messaging = admin.messaging();
-  console.log('[Firebase] Initialized with project:', projectId);
-} else {
-  console.warn('[Firebase] Missing credentials — Firebase features disabled. Set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY env vars.');
+}
+
+if (!db) {
+  console.warn('[Firebase] Missing or invalid credentials — Firebase features disabled. Set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY env vars.');
 
   // Provide stubs so services don't crash on import
+  const stubQuery = {
+    get: async () => ({ docs: [], empty: true }),
+    where: () => stubQuery,
+    orderBy: () => stubQuery,
+    startAt: () => stubQuery,
+    endAt: () => stubQuery,
+    limit: () => stubQuery,
+  };
   const stubCollection = () => ({
     doc: () => ({ get: async () => ({ exists: false }), set: async () => ({}) }),
     add: async () => ({ id: 'stub' }),
-    orderBy: () => ({ limit: () => ({ get: async () => ({ docs: [] }) }) }),
+    where: () => stubQuery,
+    orderBy: () => stubQuery,
   });
   db = { collection: stubCollection };
   auth = {};

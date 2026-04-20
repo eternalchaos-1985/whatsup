@@ -45,6 +45,12 @@ export class LGUService {
     return this.http.get<LGUOfficial[]>(`${this.apiUrl}/search`, { params });
   }
 
+  searchByAddress(query: string): Observable<LGUByLocationResponse> {
+    return this.http.get<LGUByLocationResponse>(`${this.apiUrl}/search`, {
+      params: { query },
+    });
+  }
+
   getLevels(): Observable<Record<string, string[]>> {
     return this.http.get<Record<string, string[]>>(`${this.apiUrl}/levels`);
   }

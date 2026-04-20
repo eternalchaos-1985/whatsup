@@ -5,12 +5,100 @@ const cache = new NodeCache({ stdTTL: 600 });
 const NEWS_API_KEY = process.env.NEWS_API_KEY;
 const GOOGLE_CIVIC_API_KEY = process.env.GOOGLE_CIVIC_API_KEY;
 
+// Legitimate Philippine news RSS feeds — no API key required
+const PH_RSS_FEEDS = [
+  { name: 'Inquirer', url: 'https://newsinfo.inquirer.net/feed', category: 'news' },
+  { name: 'Rappler', url: 'https://www.rappler.com/feed/', category: 'news' },
+  { name: 'PhilStar', url: 'https://www.philstar.com/rss/nation', category: 'nation' },
+  { name: 'BusinessWorld', url: 'https://www.bworldonline.com/feed/', category: 'business' },
+];
+
+/**
+ * Parse RSS XML items into a normalized article array.
+ */
+function parseRSSItems(xml, sourceName, defaultCategory) {
+  const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
+  return items.map((item, i) => {
+    const title = (item.match(/<title>([\s\S]*?)<\/title>/)?.[1] || '')
+      .replace(/<!\[CDATA\[|\]\]>/g, '').trim();
+    const link = (item.match(/<link>([\s\S]*?)<\/link>/)?.[1] || '').trim();
+    const desc = (item.match(/<description>([\s\S]*?)<\/description>/)?.[1] || '')
+      .replace(/<!\[CDATA\[|\]\]>/g, '').replace(/<[^>]*>/g, '').trim();
+    const pubDate = (item.match(/<pubDate>([\s\S]*?)<\/pubDate>/)?.[1] || '').trim();
+    const categories = (item.match(/<category><!\[CDATA\[([\s\S]*?)\]\]><\/category>/g) || [])
+      .map(c => c.replace(/<\/?category>|<!\[CDATA\[|\]\]>/g, '').trim().toLowerCase());
+    // Try to extract image from media:content, enclosure, or content:encoded
+    const imageUrl =
+      item.match(/<media:content[^>]*url=["']([^"']+)/)?.[1] ||
+      item.match(/<enclosure[^>]*url=["']([^"']+)/)?.[1] ||
+      item.match(/<img[^>]*src=["']([^"']+)/)?.[1] ||
+      null;
+
+    return {
+      source: sourceName,
+      title,
+      description: desc.substring(0, 250),
+      url: link,
+      imageUrl,
+      publishedAt: pubDate ? new Date(pubDate).toISOString() : new Date().toISOString(),
+      category: categories[0] || defaultCategory,
+      categories,
+    };
+  }).filter(a => a.title && a.url);
+}
+
+/**
+ * Fetch and aggregate news from multiple Philippine RSS feeds.
+ */
+async function getPhilippineRSSNews(filterKeywords) {
+  const cacheKey = `ph-rss-${filterKeywords || 'all'}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+
+  const results = await Promise.allSettled(
+    PH_RSS_FEEDS.map(feed =>
+      axios.get(feed.url, { timeout: 12000 })
+        .then(r => parseRSSItems(r.data, feed.name, feed.category))
+    )
+  );
+
+  let allArticles = [];
+  for (const r of results) {
+    if (r.status === 'fulfilled') allArticles.push(...r.value);
+  }
+
+  // Sort by date, newest first
+  allArticles.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
+
+  // Filter by keywords if provided
+  if (filterKeywords) {
+    const keywords = filterKeywords.toLowerCase().split(/\s+/);
+    const filtered = allArticles.filter(a => {
+      const text = `${a.title} ${a.description} ${a.categories.join(' ')}`.toLowerCase();
+      return keywords.some(kw => text.includes(kw));
+    });
+    if (filtered.length > 0) allArticles = filtered;
+  }
+
+  // Deduplicate by title similarity
+  const seen = new Set();
+  allArticles = allArticles.filter(a => {
+    const key = a.title.toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 40);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  cache.set(cacheKey, allArticles);
+  return allArticles;
+}
+
 async function getLocalNews(query, pageSize = 20) {
   const cacheKey = `news-${query}`;
   const cached = cache.get(cacheKey);
   if (cached) return cached;
 
-  // Try NewsAPI first if key is available
+  // Try NewsAPI first if key is available (broader search)
   if (NEWS_API_KEY) {
     try {
       const response = await axios.get('https://newsapi.org/v2/everything', {
@@ -37,63 +125,17 @@ async function getLocalNews(query, pageSize = 20) {
       cache.set(cacheKey, articles);
       return articles;
     } catch (error) {
-      console.error('NewsAPI error, falling back to ReliefWeb:', error.message);
+      console.error('NewsAPI error, falling back to PH RSS feeds:', error.message);
     }
   }
 
-  // Fallback: GDACS RSS feed for Philippines disaster news
-  return getGdacsNews();
-}
-
-async function getGdacsNews() {
-  const cacheKey = 'gdacs-news';
-  const cached = cache.get(cacheKey);
-  if (cached) return cached;
-
-  try {
-    const response = await axios.get('https://www.gdacs.org/xml/rss.xml', { timeout: 15000 });
-    const xml = response.data;
-    const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
-    const articles = [];
-
-    for (const item of items.slice(0, 40)) {
-      const title = (item.match(/<title>([\s\S]*?)<\/title>/)?.[1] || '').replace(/<!\[CDATA\[|\]\]>/g, '').trim();
-      const desc = (item.match(/<description>([\s\S]*?)<\/description>/)?.[1] || '').replace(/<!\[CDATA\[|\]\]>/g, '');
-      const link = (item.match(/<link>([\s\S]*?)<\/link>/)?.[1] || '').trim();
-      const pubDate = (item.match(/<pubDate>([\s\S]*?)<\/pubDate>/)?.[1] || '').trim();
-      const lat = item.match(/<geo:lat>([\s\S]*?)<\/geo:lat>/)?.[1];
-      const lng = item.match(/<geo:long>([\s\S]*?)<\/geo:long>/)?.[1];
-
-      // Include all GDACS items (global disasters) but prioritize Philippines
-      const isPH = lat && lng && parseFloat(lat) >= 4.5 && parseFloat(lat) <= 21.5 && parseFloat(lng) >= 116 && parseFloat(lng) <= 127;
-      const isRelevant = isPH || title.toLowerCase().includes('philipp') || desc.toLowerCase().includes('philipp');
-
-      if (isRelevant || articles.length < 5) {
-        articles.push({
-          source: 'GDACS',
-          title: title || 'Disaster Report',
-          description: desc.replace(/<[^>]*>/g, '').substring(0, 200),
-          url: link,
-          imageUrl: null,
-          publishedAt: pubDate ? new Date(pubDate).toISOString() : new Date().toISOString(),
-          category: 'disaster',
-        });
-      }
-    }
-
-    cache.set(cacheKey, articles);
-    return articles;
-  } catch (error) {
-    console.error('Error fetching GDACS news:', error.message);
-    throw new Error('Failed to fetch local news');
-  }
+  // Fallback: aggregate from Philippine news RSS feeds
+  return getPhilippineRSSNews(query);
 }
 
 async function getPhilippinesNews(location) {
-  const query = location
-    ? `${location} Philippines`
-    : 'Philippines hazard OR disaster OR typhoon OR flood OR earthquake';
-  return getLocalNews(query);
+  // Always use Philippine RSS feeds for local news (legitimate, always available)
+  return getPhilippineRSSNews(location);
 }
 
 async function getCivicInfo(address) {
