@@ -46,20 +46,6 @@ router.get('/facilities', async (req, res) => {
   }
 });
 
-// GET /api/lgu/civic?address=...
-router.get('/civic', async (req, res) => {
-  try {
-    const { address } = req.query;
-    if (!address) {
-      return res.status(400).json({ error: 'address query parameter is required' });
-    }
-    const data = await lguService.getCivicRepresentatives(address);
-    res.json(data || { offices: [], officials: [], divisions: {} });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
 // GET /api/lgu/search?query=...&level=...
 // Supports address geocoding: if query looks like an address/place, geocode it first
 router.get('/search', async (req, res) => {
@@ -78,6 +64,50 @@ router.get('/search', async (req, res) => {
     // Fall back to name/position search
     const results = await lguService.searchOfficials(query, level);
     res.json({ officials: results, facilities: [] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── PSGC Geographic Hierarchy ───
+
+// GET /api/lgu/regions
+router.get('/regions', async (_req, res) => {
+  try {
+    const regions = await lguService.getRegions();
+    res.json(regions);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/lgu/provinces/:regionCode
+router.get('/provinces/:regionCode', async (req, res) => {
+  try {
+    const provinces = await lguService.getProvinces(req.params.regionCode);
+    res.json(provinces);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/lgu/cities/:parentCode?type=region|province
+router.get('/cities/:parentCode', async (req, res) => {
+  try {
+    const cities = await lguService.getCitiesMunicipalities(
+      req.params.parentCode, req.query.type || 'region'
+    );
+    res.json(cities);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GET /api/lgu/barangays/:cityMunCode
+router.get('/barangays/:cityMunCode', async (req, res) => {
+  try {
+    const barangays = await lguService.getBarangays(req.params.cityMunCode);
+    res.json(barangays);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

@@ -66,6 +66,20 @@ import { LGUByLocationResponse, LGUOfficial, Facility } from '../../core/models/
               @if (data()!.area.province) {
                 <span>Province: <strong>{{ data()!.area.province }}</strong></span>
               }
+              @if (data()!.area.region) {
+                <span>Region: <strong>{{ data()!.area.region }}</strong></span>
+              }
+            </div>
+            <div class="flex flex-wrap gap-3 mt-2 text-xs text-indigo-500">
+              @if (data()!.area.psgcCode) {
+                <span class="bg-indigo-100 px-2 py-0.5 rounded">PSGC: {{ data()!.area.psgcCode }}</span>
+              }
+              @if (data()!.psgcBarangayCount) {
+                <span class="bg-indigo-100 px-2 py-0.5 rounded">{{ data()!.psgcBarangayCount }} barangays</span>
+              }
+              @if (data()!.dataSources.length) {
+                <span class="bg-indigo-100 px-2 py-0.5 rounded">Sources: {{ data()!.dataSources.join(', ') }}</span>
+              }
             </div>
           </div>
 
@@ -141,6 +155,9 @@ import { LGUByLocationResponse, LGUOfficial, Facility } from '../../core/models/
                         <p class="font-medium text-gray-800 truncate">{{ official.name }}</p>
                         <p class="text-xs text-purple-600 font-medium">{{ official.position }}</p>
                         <p class="text-xs text-gray-400">{{ official.area }}</p>
+                        @if (official.source) {
+                          <span class="inline-block text-[10px] bg-purple-50 text-purple-500 px-1.5 py-0.5 rounded mt-1">{{ official.source }}</span>
+                        }
                         @if (official.phone) {
                           <a [href]="'tel:' + official.phone"
                              class="inline-flex items-center gap-1 text-sm text-blue-600 hover:underline mt-1 focus:outline-none focus:ring-1 focus:ring-blue-500 rounded">

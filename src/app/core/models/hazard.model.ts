@@ -196,14 +196,19 @@ export interface LGUOfficial {
   facebookUrl?: string;
   websiteUrl?: string;
   updatedAt?: string;
+  source?: string;
+  termStart?: string;
 }
 
 export interface AreaInfo {
   barangay: string | null;
   city: string | null;
   province: string | null;
+  region: string | null;
   country: string;
   displayName: string;
+  psgcCode: string | null;
+  isCity: boolean;
 }
 
 export interface Facility {
@@ -223,6 +228,8 @@ export interface LGUByLocationResponse {
   barangayOfficials: LGUOfficial[];
   cityOfficials: LGUOfficial[];
   facilities: Facility[];
+  psgcBarangayCount: number | null;
+  dataSources: string[];
   timestamp: string;
 }
 
