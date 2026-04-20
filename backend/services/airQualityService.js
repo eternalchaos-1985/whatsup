@@ -3,77 +3,94 @@ const NodeCache = require('node-cache');
 
 const cache = new NodeCache({ stdTTL: 600 }); // 10-minute cache
 const IQAIR_API_KEY = process.env.IQAIR_API_KEY;
-const OPENAQ_API_URL = process.env.OPENAQ_API_URL || 'https://api.openaq.org/v2';
+
+// Open-Meteo Air Quality API — free, no key
+const OPENMETEO_AQ_API = 'https://air-quality-api.open-meteo.com/v1/air-quality';
 
 async function getAirQualityByCoords(lat, lng) {
   const cacheKey = `aqr-${lat}-${lng}`;
   const cached = cache.get(cacheKey);
   if (cached) return cached;
 
-  try {
-    const response = await axios.get(
-      `https://api.airvisual.com/v2/nearest_city`,
-      {
+  // Try IQAir first if configured
+  if (IQAIR_API_KEY) {
+    try {
+      const response = await axios.get('https://api.airvisual.com/v2/nearest_city', {
         params: { lat, lon: lng, key: IQAIR_API_KEY },
         timeout: 10000,
-      }
-    );
-    const result = {
-      source: 'iqair',
-      city: response.data.data?.city,
-      state: response.data.data?.state,
-      country: response.data.data?.country,
-      aqi: response.data.data?.current?.pollution?.aqius,
-      mainPollutant: response.data.data?.current?.pollution?.mainus,
-      temperature: response.data.data?.current?.weather?.tp,
-      humidity: response.data.data?.current?.weather?.hu,
-      timestamp: response.data.data?.current?.pollution?.ts,
-    };
-    cache.set(cacheKey, result);
-    return result;
-  } catch (error) {
-    console.error('Error fetching IQAir data:', error.message);
-    // Fallback to OpenAQ
-    return getOpenAQData(lat, lng);
+      });
+      const result = {
+        source: 'iqair',
+        city: response.data.data?.city,
+        aqi: response.data.data?.current?.pollution?.aqius,
+        mainPollutant: response.data.data?.current?.pollution?.mainus,
+        temperature: response.data.data?.current?.weather?.tp,
+        humidity: response.data.data?.current?.weather?.hu,
+        timestamp: response.data.data?.current?.pollution?.ts,
+      };
+      cache.set(cacheKey, result);
+      return result;
+    } catch (error) {
+      console.error('IQAir error, falling back to Open-Meteo:', error.message);
+    }
   }
+
+  // Fallback: Open-Meteo Air Quality (free, no key)
+  return getOpenMeteoAirQuality(lat, lng);
 }
 
-async function getOpenAQData(lat, lng, radius = 25000) {
-  const cacheKey = `openaq-${lat}-${lng}`;
+async function getOpenMeteoAirQuality(lat, lng) {
+  const cacheKey = `openmeteo-aq-${lat}-${lng}`;
   const cached = cache.get(cacheKey);
   if (cached) return cached;
 
   try {
-    const response = await axios.get(`${OPENAQ_API_URL}/latest`, {
+    const response = await axios.get(OPENMETEO_AQ_API, {
       params: {
-        coordinates: `${lat},${lng}`,
-        radius,
-        limit: 10,
-        order_by: 'distance',
+        latitude: lat,
+        longitude: lng,
+        current: 'us_aqi,pm10,pm2_5,carbon_monoxide,nitrogen_dioxide,sulphur_dioxide,ozone',
+        timezone: 'Asia/Manila',
       },
       timeout: 10000,
     });
 
-    const results = response.data.results.map(station => ({
-      source: 'openaq',
-      location: station.location,
-      city: station.city,
-      country: station.country,
-      measurements: station.measurements.map(m => ({
-        parameter: m.parameter,
-        value: m.value,
-        unit: m.unit,
-        lastUpdated: m.lastUpdated,
-      })),
-      coordinates: station.coordinates,
-    }));
+    const current = response.data?.current || {};
+    const aqi = current.us_aqi || 0;
 
-    cache.set(cacheKey, results);
-    return results;
+    const result = {
+      source: 'open-meteo',
+      city: null,
+      aqi,
+      mainPollutant: detectMainPollutant(current),
+      temperature: null,
+      humidity: null,
+      pm25: current.pm2_5,
+      pm10: current.pm10,
+      no2: current.nitrogen_dioxide,
+      so2: current.sulphur_dioxide,
+      o3: current.ozone,
+      co: current.carbon_monoxide,
+      timestamp: current.time || new Date().toISOString(),
+    };
+
+    cache.set(cacheKey, result);
+    return result;
   } catch (error) {
-    console.error('Error fetching OpenAQ data:', error.message);
+    console.error('Error fetching Open-Meteo air quality:', error.message);
     throw new Error('Failed to fetch air quality data');
   }
+}
+
+function detectMainPollutant(current) {
+  const pollutants = [
+    { name: 'pm2.5', value: current.pm2_5 || 0 },
+    { name: 'pm10', value: current.pm10 || 0 },
+    { name: 'o3', value: current.ozone || 0 },
+    { name: 'no2', value: current.nitrogen_dioxide || 0 },
+  ];
+  pollutants.sort((a, b) => b.value - a.value);
+  return pollutants[0]?.name || 'pm2.5';
 }
 
 function getAQILevel(aqi) {
@@ -85,4 +102,4 @@ function getAQILevel(aqi) {
   return { level: 'Hazardous', color: '#7e0023', advice: 'Emergency conditions. Stay indoors.' };
 }
 
-module.exports = { getAirQualityByCoords, getOpenAQData, getAQILevel };
+module.exports = { getAirQualityByCoords, getOpenMeteoAirQuality, getAQILevel };
