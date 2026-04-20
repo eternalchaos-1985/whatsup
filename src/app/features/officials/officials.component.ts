@@ -69,20 +69,20 @@ import { LGUByLocationResponse, LGUOfficial, Facility, EmergencyContact } from '
                     <div class="flex-1 min-w-0">
                       <p class="font-medium text-gray-800">{{ loc.displayName }}</p>
                       <div class="flex flex-wrap gap-2 mt-1">
-                        @if (loc.barangay) {
-                          <span class="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">🏠 {{ loc.barangay }}</span>
-                        }
-                        @if (loc.city) {
-                          <span class="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded">🏢 {{ loc.city }}</span>
+                        @if (loc.region) {
+                          <span class="text-xs bg-amber-50 text-amber-600 px-2 py-0.5 rounded">🌏 {{ loc.region }}</span>
                         }
                         @if (loc.province) {
                           <span class="text-xs bg-green-50 text-green-600 px-2 py-0.5 rounded">🗺️ {{ loc.province }}</span>
                         }
-                        @if (loc.region) {
-                          <span class="text-xs bg-amber-50 text-amber-600 px-2 py-0.5 rounded">🌏 {{ loc.region }}</span>
+                        @if (loc.city) {
+                          <span class="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded">🏢 {{ loc.city }}</span>
                         }
-                        @if (loc.psgcCode) {
-                          <span class="text-xs bg-gray-50 text-gray-400 px-2 py-0.5 rounded">PSGC {{ loc.psgcCode }}</span>
+                        @if (loc.district) {
+                          <span class="text-xs bg-purple-50 text-purple-600 px-2 py-0.5 rounded">🏘️ {{ loc.district }}</span>
+                        }
+                        @if (loc.barangay) {
+                          <span class="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">🏠 {{ loc.barangay }}</span>
                         }
                       </div>
                     </div>
@@ -99,6 +99,8 @@ import { LGUByLocationResponse, LGUOfficial, Facility, EmergencyContact } from '
             @if (selectedLocation(); as loc) {
               <div class="bg-indigo-50 rounded-lg p-3 border border-indigo-200 mb-4">
                 <div class="flex items-center gap-2 text-sm text-indigo-700 flex-wrap">
+                  <span class="text-indigo-400">🇵🇭</span>
+                  <span class="text-indigo-300">›</span>
                   @if (loc.region) {
                     <span class="bg-amber-50 text-amber-700 px-2 py-0.5 rounded">🌏 {{ loc.region }}</span>
                     <span class="text-indigo-300">›</span>
@@ -108,7 +110,11 @@ import { LGUByLocationResponse, LGUOfficial, Facility, EmergencyContact } from '
                     <span class="text-indigo-300">›</span>
                   }
                   @if (loc.city) {
-                    <span class="bg-blue-50 text-blue-700 px-2 py-0.5 rounded font-medium">🏢 {{ loc.city }}</span>
+                    <span class="bg-blue-50 text-blue-700 px-2 py-0.5 rounded">🏢 {{ loc.city }}</span>
+                    <span class="text-indigo-300">›</span>
+                  }
+                  @if (loc.district) {
+                    <span class="bg-purple-50 text-purple-700 px-2 py-0.5 rounded font-medium">🏘️ {{ loc.district }}</span>
                   }
                 </div>
                 <button (click)="goBackToLocations()" class="text-xs text-indigo-500 hover:text-indigo-700 mt-2 underline">← Back to locations</button>

@@ -17,7 +17,11 @@ const port = process.env.PORT || 3000;
 
 // Security & parsing middleware
 app.use(helmet());
-app.use(cors({ origin: process.env.CORS_ORIGIN || 'http://localhost:4200' }));
+app.use(cors({
+  origin: process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(',')
+    : ['http://localhost:4200', 'https://whatsup-civic.web.app', 'https://whatsup-civic.firebaseapp.com'],
+}));
 app.use(express.json());
 
 // Health check

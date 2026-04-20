@@ -20,6 +20,7 @@ export interface SearchLocation {
   displayName: string;
   type: string;
   barangay: string | null;
+  district: string | null;
   city: string | null;
   province: string | null;
   region: string | null;
