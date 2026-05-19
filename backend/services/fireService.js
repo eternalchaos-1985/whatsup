@@ -10,24 +10,38 @@ const NASA_FIRMS_MAP_KEY = process.env.NASA_FIRMS_MAP_KEY;
 // Philippine news RSS feeds specifically for fire incident coverage
 const FIRE_RSS_FEEDS = [
   { name: 'GMA News', url: 'https://data.gmanetwork.com/gno/rss/news/feed.xml' },
+  { name: 'GMA Regions', url: 'https://data.gmanetwork.com/gno/rss/news/regions/feed.xml' },
   { name: 'Inquirer', url: 'https://newsinfo.inquirer.net/feed' },
   { name: 'Rappler', url: 'https://www.rappler.com/feed/' },
+  { name: 'Rappler Nation', url: 'https://www.rappler.com/nation/feed/' },
   { name: 'PhilStar', url: 'https://www.philstar.com/rss/nation' },
+  { name: 'PhilStar Metro', url: 'https://www.philstar.com/rss/metro' },
   { name: 'Manila Bulletin', url: 'https://mb.com.ph/feed' },
   { name: 'PNA', url: 'https://www.pna.gov.ph/rss.xml' },
   { name: 'SunStar', url: 'https://www.sunstar.com.ph/feeds' },
+  { name: 'SunStar Cebu', url: 'https://www.sunstar.com.ph/cebu/feeds' },
+  { name: 'SunStar Davao', url: 'https://www.sunstar.com.ph/davao/feeds' },
   { name: 'MindaNews', url: 'https://www.mindanews.com/feed/' },
   { name: 'Daily Tribune', url: 'https://tribune.net.ph/feed/' },
+  { name: 'ABS-CBN News', url: 'https://news.abs-cbn.com/feed' },
+  { name: 'CNN Philippines', url: 'https://www.cnnphilippines.com/feed' },
+  { name: 'DZBB', url: 'https://www.gmanetwork.com/news/rss/dzbb/feed.xml' },
 ];
 
 // Keywords to identify fire-related articles (English + Filipino)
-const FIRE_KEYWORDS = /\b(fire(?!\s*(?:works?|crackers?|arms?|d\b|fighter|fox|fly|wall|base|bird|place))|sunog|nasunog|nagliyab|blaze|arson|burned|burning|fire.?truck|fire.?station|bfp|conflagration|inferno)\b/i;
+const FIRE_KEYWORDS = /\b(fire(?!\s*(?:works?|crackers?|arms?|d\b|fighter|fox|fly|wall|base|bird|place|insurance|sale|power))|sunog|nasunog|nagliyab|blaze|arson|burned|burning|fire.?truck|fire.?station|bfp|conflagration|inferno)\b/i;
+
+// Negative filter: articles matching these patterns are likely NOT about fire incidents
+const FIRE_FALSE_POSITIVE = /\b(fire\s*insurance|insurance\s*(?:firm|compan|polic)|crossfire|friendly\s*fire|ceasefire|cease.fire|fire\s*sale|rapid\s*fire|gunfire|under\s*fire|firing\s*(?:line|squad|range))\b/i;
 
 /**
  * Fetch satellite fire hotspots from NASA FIRMS.
  * Covers the Philippines bounding box by default.
+ * NASA FIRMS allows up to 10 days of NRT data.
  */
-async function getNasaFirmsData(days = 2) {
+async function getNasaFirmsData(days = 7) {
+  // Clamp to API limit of 10 days
+  days = Math.min(Math.max(days, 1), 10);
   const cacheKey = `nasa-firms-${days}`;
   const cached = cache.get(cacheKey);
   if (cached) return cached;
@@ -185,6 +199,8 @@ function parseFireRSSItems(xml, sourceName) {
     // Filter: only keep fire-related articles
     const text = `${title} ${desc}`;
     if (!FIRE_KEYWORDS.test(text)) continue;
+    // Reject false positives (insurance disputes, crossfire, etc.)
+    if (FIRE_FALSE_POSITIVE.test(text)) continue;
 
     // Geotag using location extraction
     const location = extractLocationFromText(text);
@@ -208,21 +224,34 @@ function parseFireRSSItems(xml, sourceName) {
 
 /**
  * Get fire incident reports from Philippine news sources (replaces BFP placeholder).
+ * Supports date range and location filtering.
  */
-async function getBFPReports(location) {
-  const cacheKey = `fire-reports-${location || 'all'}`;
+async function getBFPReports(location, dateFrom, dateTo) {
+  const cacheKey = `fire-reports-${location || 'all'}-${dateFrom || ''}-${dateTo || ''}`;
   const cached = cache.get(cacheKey);
   if (cached) return cached;
 
   const reports = await getFireNewsFromRSS();
 
-  // Filter by location keyword if provided
   let filtered = reports;
+
+  // Filter by date range if provided
+  if (dateFrom || dateTo) {
+    const from = dateFrom ? new Date(dateFrom).getTime() : 0;
+    const to = dateTo ? new Date(dateTo + 'T23:59:59').getTime() : Infinity;
+    filtered = filtered.filter(r => {
+      const pubTime = new Date(r.publishedAt).getTime();
+      return pubTime >= from && pubTime <= to;
+    });
+  }
+
+  // Filter by location keyword if provided
   if (location) {
     const loc = location.toLowerCase();
-    filtered = reports.filter(r =>
+    filtered = filtered.filter(r =>
       (r.title && r.title.toLowerCase().includes(loc)) ||
-      (r.locationName && r.locationName.toLowerCase().includes(loc))
+      (r.locationName && r.locationName.toLowerCase().includes(loc)) ||
+      (r.description && r.description.toLowerCase().includes(loc))
     );
   }
 
@@ -234,10 +263,17 @@ async function getBFPReports(location) {
  * Aggregate fire incidents from all sources, filtered by location + date range.
  */
 async function getFireIncidents({ lat, lng, radius = 10, dateFrom, dateTo, location }) {
+  // Calculate how many days to request from NASA FIRMS based on user's date range
+  let firmsDays = 7;
+  if (dateFrom) {
+    const diffMs = Date.now() - new Date(dateFrom).getTime();
+    firmsDays = Math.min(10, Math.max(1, Math.ceil(diffMs / (24 * 60 * 60 * 1000))));
+  }
+
   const [firms, news, bfp] = await Promise.allSettled([
-    getNasaFirmsData(),
+    getNasaFirmsData(firmsDays),
     getFireNews(location, dateFrom, dateTo),
-    getBFPReports(location),
+    getBFPReports(location, dateFrom, dateTo),
   ]);
 
   let satelliteHotspots = firms.status === 'fulfilled' ? firms.value : [];

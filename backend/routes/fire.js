@@ -45,8 +45,8 @@ router.get('/news', async (req, res) => {
 // GET /api/fire/bfp — BFP official reports
 router.get('/bfp', async (req, res) => {
   try {
-    const { location } = req.query;
-    const data = await fireService.getBFPReports(location);
+    const { location, dateFrom, dateTo } = req.query;
+    const data = await fireService.getBFPReports(location, dateFrom, dateTo);
     res.json(data);
   } catch (error) {
     res.status(500).json({ error: error.message });
