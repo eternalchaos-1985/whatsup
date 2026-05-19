@@ -442,4 +442,4 @@ async function getCivicInfo(address) {
   }
 }
 
-module.exports = { getLocalNews, getPhilippinesNews, getCivicInfo };
+module.exports = { getLocalNews, getPhilippinesNews, getCivicInfo, extractLocationFromText };

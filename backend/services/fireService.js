@@ -1,10 +1,27 @@
 const axios = require('axios');
 const NodeCache = require('node-cache');
 const geoService = require('./geoService');
+const { extractLocationFromText } = require('./newsService');
 
 const cache = new NodeCache({ stdTTL: 300 }); // 5-minute cache
 const NEWS_API_KEY = process.env.NEWS_API_KEY;
 const NASA_FIRMS_MAP_KEY = process.env.NASA_FIRMS_MAP_KEY;
+
+// Philippine news RSS feeds specifically for fire incident coverage
+const FIRE_RSS_FEEDS = [
+  { name: 'GMA News', url: 'https://data.gmanetwork.com/gno/rss/news/feed.xml' },
+  { name: 'Inquirer', url: 'https://newsinfo.inquirer.net/feed' },
+  { name: 'Rappler', url: 'https://www.rappler.com/feed/' },
+  { name: 'PhilStar', url: 'https://www.philstar.com/rss/nation' },
+  { name: 'Manila Bulletin', url: 'https://mb.com.ph/feed' },
+  { name: 'PNA', url: 'https://www.pna.gov.ph/rss.xml' },
+  { name: 'SunStar', url: 'https://www.sunstar.com.ph/feeds' },
+  { name: 'MindaNews', url: 'https://www.mindanews.com/feed/' },
+  { name: 'Daily Tribune', url: 'https://tribune.net.ph/feed/' },
+];
+
+// Keywords to identify fire-related articles (English + Filipino)
+const FIRE_KEYWORDS = /\b(fire(?!\s*(?:works?|crackers?|arms?|d\b|fighter|fox|fly|wall|base|bird|place))|sunog|nasunog|nagliyab|blaze|arson|burned|burning|fire.?truck|fire.?station|bfp|conflagration|inferno)\b/i;
 
 /**
  * Fetch satellite fire hotspots from NASA FIRMS.
@@ -112,18 +129,105 @@ async function getFireNews(location, dateFrom, dateTo) {
 }
 
 /**
- * Get BFP (Bureau of Fire Protection) incident reports.
- * Placeholder — in production, parse BFP RSS/press releases or open data.
+ * Aggregate fire-related news from multiple Philippine RSS feeds.
+ * Filters articles by fire keywords and geotags them.
  */
-async function getBFPReports(location) {
-  const cacheKey = `bfp-${location || 'all'}`;
+async function getFireNewsFromRSS() {
+  const cacheKey = 'fire-rss-aggregated';
   const cached = cache.get(cacheKey);
   if (cached) return cached;
 
-  // Placeholder: replace with actual BFP feed integration
-  const reports = [];
-  cache.set(cacheKey, reports);
-  return reports;
+  const results = await Promise.allSettled(
+    FIRE_RSS_FEEDS.map(feed =>
+      axios.get(feed.url, { timeout: 12000, headers: { 'User-Agent': 'Mozilla/5.0 (compatible; WhatsUp-CivicPlatform/1.0)' } })
+        .then(r => parseFireRSSItems(r.data, feed.name))
+    )
+  );
+
+  let articles = [];
+  for (const r of results) {
+    if (r.status === 'fulfilled') articles.push(...r.value);
+  }
+
+  // Sort by date, newest first
+  articles.sort((a, b) => new Date(b.publishedAt || 0).getTime() - new Date(a.publishedAt || 0).getTime());
+
+  // Deduplicate by title similarity
+  const seen = new Set();
+  articles = articles.filter(a => {
+    const key = a.title.toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 40);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  cache.set(cacheKey, articles);
+  return articles;
+}
+
+/**
+ * Parse RSS items and filter to fire-related ones, with geolocation.
+ */
+function parseFireRSSItems(xml, sourceName) {
+  const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
+  const fireArticles = [];
+
+  for (const item of items) {
+    const title = (item.match(/<title>([\s\S]*?)<\/title>/)?.[1] || '')
+      .replace(/<!\[CDATA\[|\]\]>/g, '').trim();
+    const link = (item.match(/<link>([\s\S]*?)<\/link>/)?.[1] || '').trim();
+    const desc = (item.match(/<description>([\s\S]*?)<\/description>/)?.[1] || '')
+      .replace(/<!\[CDATA\[|\]\]>/g, '').replace(/<[^>]*>/g, '').trim();
+    const pubDate = (item.match(/<pubDate>([\s\S]*?)<\/pubDate>/)?.[1] || '').trim();
+
+    if (!title || !link) continue;
+
+    // Filter: only keep fire-related articles
+    const text = `${title} ${desc}`;
+    if (!FIRE_KEYWORDS.test(text)) continue;
+
+    // Geotag using location extraction
+    const location = extractLocationFromText(text);
+
+    fireArticles.push({
+      id: `fire-rss-${sourceName.toLowerCase().replace(/\s+/g, '-')}-${fireArticles.length}`,
+      source: sourceName,
+      title,
+      description: desc.substring(0, 250),
+      url: link,
+      publishedAt: pubDate ? new Date(pubDate).toISOString() : new Date().toISOString(),
+      lat: location?.lat || null,
+      lng: location?.lng || null,
+      locationName: location?.name || null,
+      type: 'news-report',
+    });
+  }
+
+  return fireArticles;
+}
+
+/**
+ * Get fire incident reports from Philippine news sources (replaces BFP placeholder).
+ */
+async function getBFPReports(location) {
+  const cacheKey = `fire-reports-${location || 'all'}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+
+  const reports = await getFireNewsFromRSS();
+
+  // Filter by location keyword if provided
+  let filtered = reports;
+  if (location) {
+    const loc = location.toLowerCase();
+    filtered = reports.filter(r =>
+      (r.title && r.title.toLowerCase().includes(loc)) ||
+      (r.locationName && r.locationName.toLowerCase().includes(loc))
+    );
+  }
+
+  cache.set(cacheKey, filtered);
+  return filtered;
 }
 
 /**
