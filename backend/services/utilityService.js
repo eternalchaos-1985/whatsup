@@ -371,11 +371,18 @@ async function getScheduledInterruptions(utilityType, location) {
   if (cached) return cached;
 
   let interruptions = [];
+  const now = new Date();
 
   if (utilityType === 'water') {
     // Fetch real Maynilad data
     const maynilad = await getMayniladInterruptions();
-    interruptions = maynilad;
+
+    // Filter out past interruptions (keep if endDate is in the future or unknown)
+    interruptions = maynilad.filter(i => {
+      if (i.endDate) return new Date(i.endDate) >= now;
+      if (i.startDate) return new Date(i.startDate) >= now;
+      return true; // keep if no dates parsed
+    });
 
     // Filter by location if provided
     if (location) {
