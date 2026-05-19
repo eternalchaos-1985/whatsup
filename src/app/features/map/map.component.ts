@@ -8,7 +8,7 @@ import { UtilityService } from '../../core/services/utility.service';
 import { LGUService } from '../../core/services/lgu.service';
 import {
   HazardAlert, EarthquakeEvent, FireIncident, NewsArticle,
-  CommunityEvent, UtilityNewsReport, LGUOfficial, Facility, EmergencyContact
+  CommunityEvent, UtilityNewsReport, ScheduledInterruption, LGUOfficial, Facility, EmergencyContact
 } from '../../core/models/hazard.model';
 import * as L from 'leaflet';
 
@@ -695,32 +695,43 @@ export class MapComponent implements OnInit, OnDestroy {
         group.clearLayers();
         let count = 0;
         const items: SidePanelItem[] = [];
+        const typeIcons: Record<string, string> = { water: '💧', electric: '⚡', internet: '📶' };
+
+        // Collect scheduled interruptions (Maynilad, etc.)
+        const allInterruptions: ScheduledInterruption[] = [
+          ...(data.water?.scheduledInterruptions ?? []),
+          ...(data.electric?.scheduledInterruptions ?? []),
+          ...(data.internet?.scheduledInterruptions ?? []),
+        ];
+
+        // Collect news reports
         const allNews: UtilityNewsReport[] = [
           ...(data.water?.newsReports ?? []),
           ...(data.electric?.newsReports ?? []),
           ...(data.internet?.newsReports ?? []),
         ];
 
-        if (loc && allNews.length > 0) {
-          count = allNews.length;
-          const typeIcons: Record<string, string> = { water: '💧', electric: '⚡', internet: '📶' };
-          L.marker([loc.lat, loc.lng - 0.005], {
-            icon: this.createDivIcon('⚡', '#eab308'),
-          }).bindPopup(
-            `<div class="text-sm max-h-48 overflow-y-auto">
-              <div class="font-bold mb-1">⚡ Utility Advisories (${count})</div>
-              ${allNews.slice(0, 8).map(n =>
-                `<div class="border-b pb-1 mb-1">
-                  <div>${typeIcons[n.utilityType] ?? '⚡'} <b>${n.title}</b></div>
-                  <div class="text-xs text-gray-500">${n.source} · ${new Date(n.publishedAt).toLocaleDateString()}</div>
-                </div>`
-              ).join('')}
-            </div>`
-          ).addTo(group);
+        count = allInterruptions.length + allNews.length;
+
+        // Show scheduled interruptions in panel
+        for (const item of allInterruptions) {
+          items.push({
+            id: item.id,
+            layer: 'utilities',
+            icon: typeIcons[item.utilityType] ?? '⚡',
+            color: '#eab308',
+            title: `${item.provider} — ${item.area}`,
+            subtitle: item.schedule || (item.startDate ? `${new Date(item.startDate).toLocaleString()} – ${item.endDate ? new Date(item.endDate).toLocaleString() : ''}` : item.reason),
+            detail: item.location ? `📍 ${item.location} · ${item.reason}` : item.reason,
+            timestamp: item.publishedAt || item.startDate || undefined,
+            lat: loc?.lat,
+            lng: loc ? loc.lng - 0.005 : undefined,
+            url: item.source,
+          });
         }
 
+        // Show news in panel
         for (const n of allNews) {
-          const typeIcons: Record<string, string> = { water: '💧', electric: '⚡', internet: '📶' };
           items.push({
             id: n.id,
             layer: 'utilities',
@@ -728,10 +739,25 @@ export class MapComponent implements OnInit, OnDestroy {
             color: '#eab308',
             title: n.title,
             subtitle: `${n.source} · ${n.utilityType}`,
+            detail: n.description?.slice(0, 120),
             timestamp: n.publishedAt,
             lat: loc?.lat,
-            lng: loc ? loc.lng - 0.005 : undefined,
+            lng: loc ? loc.lng + 0.005 : undefined,
+            url: n.url,
           });
+        }
+
+        // Map markers
+        if (loc && allInterruptions.length > 0) {
+          L.marker([loc.lat, loc.lng - 0.005], {
+            icon: this.createDivIcon('💧', '#3b82f6'),
+          }).bindPopup(this.utilityInterruptionPopup(allInterruptions)).addTo(group);
+        }
+
+        if (loc && allNews.length > 0) {
+          L.marker([loc.lat, loc.lng + 0.005], {
+            icon: this.createDivIcon('⚡', '#eab308'),
+          }).bindPopup(this.utilityNewsPopup(allNews)).addTo(group);
         }
 
         this.layerCounts.update(c => ({ ...c, utilities: count }));
@@ -854,6 +880,35 @@ export class MapComponent implements OnInit, OnDestroy {
       <div class="text-[10px] text-gray-400 mt-1">${article.source} · ${new Date(article.publishedAt).toLocaleDateString()}</div>
       ${article.locationName ? `<div class="text-[10px] text-indigo-500 mt-0.5">📍 ${article.locationName}</div>` : ''}
       ${article.description ? `<div class="text-xs text-gray-600 mt-1">${article.description.slice(0, 150)}</div>` : ''}
+    </div>`;
+  }
+
+  private utilityInterruptionPopup(items: ScheduledInterruption[]): string {
+    const typeIcons: Record<string, string> = { water: '💧', electric: '⚡', internet: '📶' };
+    return `<div class="text-sm max-w-80 max-h-56 overflow-y-auto">
+      <div class="font-bold mb-1">📋 Scheduled Interruptions (${items.length})</div>
+      ${items.slice(0, 10).map(i =>
+        `<div class="border-b pb-1 mb-1">
+          <div class="font-medium text-xs">${typeIcons[i.utilityType] ?? '⚡'} ${i.provider} — ${i.area}</div>
+          ${i.location ? `<div class="text-[10px] text-gray-600">📍 ${i.location}</div>` : ''}
+          ${i.schedule ? `<div class="text-[10px] text-gray-500">🕐 ${i.schedule}</div>` : ''}
+          <div class="text-[10px] text-gray-400">${i.reason}</div>
+        </div>`
+      ).join('')}
+      ${items.length > 10 ? `<div class="text-xs text-gray-400 mt-1">+ ${items.length - 10} more</div>` : ''}
+    </div>`;
+  }
+
+  private utilityNewsPopup(items: UtilityNewsReport[]): string {
+    const typeIcons: Record<string, string> = { water: '💧', electric: '⚡', internet: '📶' };
+    return `<div class="text-sm max-w-80 max-h-56 overflow-y-auto">
+      <div class="font-bold mb-1">⚡ Utility News (${items.length})</div>
+      ${items.slice(0, 8).map(n =>
+        `<div class="border-b pb-1 mb-1">
+          <div>${typeIcons[n.utilityType] ?? '⚡'} <a href="${this.sanitizeUrl(n.url)}" target="_blank" rel="noopener" class="text-blue-700 hover:underline font-medium text-xs">${n.title}</a></div>
+          <div class="text-[10px] text-gray-400">${n.source} · ${new Date(n.publishedAt).toLocaleDateString()}</div>
+        </div>`
+      ).join('')}
     </div>`;
   }
 
