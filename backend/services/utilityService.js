@@ -235,6 +235,131 @@ function parseWaterRSSItems(xml, sourceName) {
   return waterArticles;
 }
 
+// ─── Electricity: Meralco RSS + Philippine news RSS ───
+
+const MERALCO_RSS_URL = 'https://company.meralco.com.ph/rss.xml';
+
+const POWER_RSS_FEEDS = [
+  { name: 'Inquirer', url: 'https://newsinfo.inquirer.net/feed' },
+  { name: 'Rappler', url: 'https://www.rappler.com/feed/' },
+  { name: 'GMA News', url: 'https://data.gmanetwork.com/gno/rss/news/feed.xml' },
+  { name: 'PhilStar', url: 'https://www.philstar.com/rss/nation' },
+  { name: 'Manila Bulletin', url: 'https://mb.com.ph/feed' },
+  { name: 'PNA', url: 'https://www.pna.gov.ph/rss.xml' },
+];
+
+const POWER_KEYWORDS = /\b(power.?interruption|power.?outage|brownout|blackout|meralco|rotational.?blackout|no.?electricity|electric.?supply|scheduled.?maintenance|ngcp|load.?shedding|yellow.?alert|red.?alert|power.?restoration|power.?shutdown)\b/i;
+
+/**
+ * Fetch Meralco official advisories from their Drupal RSS feed.
+ */
+async function getMeralcoAdvisories() {
+  const cacheKey = 'meralco-advisories';
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const response = await axios.get(MERALCO_RSS_URL, {
+      timeout: 12000,
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; WhatsUp-CivicPlatform/1.0)' },
+    });
+
+    const items = response.data.match(/<item>[\s\S]*?<\/item>/g) || [];
+    const advisories = [];
+
+    for (const item of items) {
+      const title = (item.match(/<title>([\s\S]*?)<\/title>/)?.[1] || '')
+        .replace(/<!\[CDATA\[|\]\]>/g, '').trim();
+      const link = (item.match(/<link>([\s\S]*?)<\/link>/)?.[1] || '').trim();
+      const pubDate = (item.match(/<pubDate>([\s\S]*?)<\/pubDate>/)?.[1] || '').trim();
+      const desc = (item.match(/<description>([\s\S]*?)<\/description>/)?.[1] || '')
+        .replace(/<!\[CDATA\[|\]\]>/g, '').replace(/<[^>]*>/g, '').trim();
+
+      if (!title || !link) continue;
+
+      advisories.push({
+        id: `meralco-${advisories.length}`,
+        utilityType: 'electric',
+        source: 'Meralco',
+        title,
+        description: desc.substring(0, 250),
+        url: link,
+        publishedAt: pubDate ? new Date(pubDate).toISOString() : new Date().toISOString(),
+      });
+    }
+
+    cache.set(cacheKey, advisories);
+    return advisories;
+  } catch (error) {
+    console.error('[Meralco RSS] Error:', error.message);
+    return [];
+  }
+}
+
+/**
+ * Fetch power/electricity advisories from Philippine RSS feeds.
+ */
+async function getPowerNewsFromRSS() {
+  const cacheKey = 'power-news-rss';
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+
+  const results = await Promise.allSettled(
+    POWER_RSS_FEEDS.map(feed =>
+      axios.get(feed.url, { timeout: 12000, headers: { 'User-Agent': 'Mozilla/5.0 (compatible; WhatsUp-CivicPlatform/1.0)' } })
+        .then(r => parsePowerRSSItems(r.data, feed.name))
+    )
+  );
+
+  let articles = [];
+  for (const r of results) {
+    if (r.status === 'fulfilled') articles.push(...r.value);
+  }
+
+  // Sort newest first, deduplicate
+  articles.sort((a, b) => new Date(b.publishedAt || 0).getTime() - new Date(a.publishedAt || 0).getTime());
+  const seen = new Set();
+  articles = articles.filter(a => {
+    const key = a.title.toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 40);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  cache.set(cacheKey, articles);
+  return articles;
+}
+
+function parsePowerRSSItems(xml, sourceName) {
+  const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
+  const powerArticles = [];
+
+  for (const item of items) {
+    const title = (item.match(/<title>([\s\S]*?)<\/title>/)?.[1] || '')
+      .replace(/<!\[CDATA\[|\]\]>/g, '').trim();
+    const link = (item.match(/<link>([\s\S]*?)<\/link>/)?.[1] || '').trim();
+    const desc = (item.match(/<description>([\s\S]*?)<\/description>/)?.[1] || '')
+      .replace(/<!\[CDATA\[|\]\]>/g, '').replace(/<[^>]*>/g, '').trim();
+    const pubDate = (item.match(/<pubDate>([\s\S]*?)<\/pubDate>/)?.[1] || '').trim();
+
+    if (!title || !link) continue;
+    const text = `${title} ${desc}`;
+    if (!POWER_KEYWORDS.test(text)) continue;
+
+    powerArticles.push({
+      id: `power-news-${sourceName.toLowerCase().replace(/\s+/g, '-')}-${powerArticles.length}`,
+      utilityType: 'electric',
+      source: sourceName,
+      title,
+      description: desc.substring(0, 250),
+      url: link,
+      publishedAt: pubDate ? new Date(pubDate).toISOString() : new Date().toISOString(),
+    });
+  }
+
+  return powerArticles;
+}
+
 // ─── Scheduled Interruptions (combined) ───
 
 /**
@@ -283,9 +408,30 @@ async function getUtilityNews(utilityType, location) {
     return articles;
   }
 
-  // For electric/internet, use NewsAPI if available
+  if (utilityType === 'electric') {
+    // Combine Meralco official RSS + Philippine news RSS
+    const [meralco, newsRSS] = await Promise.allSettled([
+      getMeralcoAdvisories(),
+      getPowerNewsFromRSS(),
+    ]);
+
+    let articles = [
+      ...(meralco.status === 'fulfilled' ? meralco.value : []),
+      ...(newsRSS.status === 'fulfilled' ? newsRSS.value : []),
+    ];
+
+    if (location) {
+      const loc = location.toLowerCase();
+      articles = articles.filter(a =>
+        a.title.toLowerCase().includes(loc) ||
+        a.description?.toLowerCase().includes(loc)
+      );
+    }
+    return articles;
+  }
+
+  // For internet, use NewsAPI if available
   const typeKeywords = {
-    electric: 'power interruption OR power outage OR brownout OR blackout OR Meralco',
     internet: 'internet outage OR network down OR PLDT outage OR Globe outage OR Converge outage',
   };
 
