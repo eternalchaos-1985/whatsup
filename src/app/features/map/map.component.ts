@@ -323,6 +323,10 @@ export class MapComponent implements OnInit, OnDestroy {
       this.layerCounts.update(c => { const copy = { ...c }; delete copy[key]; return copy; });
       this.panelItems.update(items => items.filter(i => i.layer !== key));
     }
+
+    // Ensure panel only contains items from currently active layers
+    const activeKeys = new Set(updated.filter(l => l.active).map(l => l.key));
+    this.panelItems.update(items => items.filter(i => activeKeys.has(i.layer)));
   }
 
   // ── Map setup ──
@@ -689,7 +693,7 @@ export class MapComponent implements OnInit, OnDestroy {
 
   private loadUtilities(): void {
     const loc = this.locationService.currentLocation();
-    this.utilityService.getAll(loc?.name).subscribe({
+    this.utilityService.getAll().subscribe({
       next: (data) => {
         const group = this.layerGroups['utilities'];
         group.clearLayers();
