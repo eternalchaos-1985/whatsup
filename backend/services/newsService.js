@@ -184,12 +184,53 @@ const PH_LOCATIONS = [
 const PH_LOCATIONS_SORTED = [...PH_LOCATIONS].sort((a, b) => b.name.length - a.name.length);
 
 /**
+ * Extract a Philippine news dateline pattern from text.
+ * Philippine news articles typically start with: "TOWN/CITY, Province —" or "CITY, Province —"
+ * e.g. "BENITO SOLIVEN, Isabela —", "CALAPAN CITY, Oriental Mindoro —"
+ * Returns the full dateline string for display, or null.
+ */
+function extractDateline(text) {
+  if (!text) return null;
+  // Match: UPPERCASE WORDS (1-4), comma, then a known location, then optional dash/emdash
+  const datelinePattern = /\b([A-Z][A-Z .'-]+(?:\s+[A-Z][A-Z .'-]+){0,4}),\s*([A-Za-z\s]+?)(?:\s*[—–\-]|\s*$)/;
+  const match = text.match(datelinePattern);
+  if (!match) return null;
+
+  const townPart = match[1].trim();
+  const provincePart = match[2].trim();
+
+  // Verify the province/city part exists in our gazetteer
+  const gazetteerMatch = PH_LOCATIONS_SORTED.find(loc =>
+    loc.name.toLowerCase() === provincePart.toLowerCase()
+  );
+  if (!gazetteerMatch) return null;
+
+  // Format: "Town, Province" with title case for town
+  const townFormatted = townPart.split(/\s+/)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+
+  return {
+    displayName: `${townFormatted}, ${gazetteerMatch.name}`,
+    lat: gazetteerMatch.lat,
+    lng: gazetteerMatch.lng,
+  };
+}
+
+/**
  * Extract the most relevant Philippine location from text (title + description).
  * Returns { name, lat, lng } or null if no location found.
  */
 function extractLocationFromText(text) {
   if (!text) return null;
-  const normalized = text.toLowerCase();
+
+  // First, try to extract a specific dateline (e.g. "BENITO SOLIVEN, Isabela —")
+  const dateline = extractDateline(text);
+  if (dateline) {
+    return { name: dateline.displayName, lat: dateline.lat, lng: dateline.lng };
+  }
+
+  // Fall back to gazetteer keyword matching
   for (const loc of PH_LOCATIONS_SORTED) {
     // Word-boundary-aware match to avoid partial matches (e.g. "Naga" in "Nagano")
     const pattern = new RegExp('\\b' + loc.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i');
