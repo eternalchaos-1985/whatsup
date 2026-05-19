@@ -257,10 +257,29 @@ function geotagArticles(articles) {
 
 // Legitimate Philippine news RSS feeds — no API key required
 const PH_RSS_FEEDS = [
+  // Major national outlets
   { name: 'Inquirer', url: 'https://newsinfo.inquirer.net/feed', category: 'news' },
   { name: 'Rappler', url: 'https://www.rappler.com/feed/', category: 'news' },
   { name: 'PhilStar', url: 'https://www.philstar.com/rss/nation', category: 'nation' },
   { name: 'BusinessWorld', url: 'https://www.bworldonline.com/feed/', category: 'business' },
+  { name: 'Manila Bulletin', url: 'https://mb.com.ph/feed', category: 'news' },
+  { name: 'Manila Times', url: 'https://www.manilatimes.net/feed', category: 'news' },
+  { name: 'GMA News', url: 'https://data.gmanetwork.com/gno/rss/news/feed.xml', category: 'news' },
+  { name: 'ABS-CBN News', url: 'https://news.abs-cbn.com/rss', category: 'news' },
+  { name: 'CNN Philippines', url: 'https://www.cnnphilippines.com/rss/news.xml', category: 'news' },
+  { name: 'Philippine Star', url: 'https://www.philstar.com/rss/headlines', category: 'news' },
+  // Business & Economy
+  { name: 'BusinessMirror', url: 'https://businessmirror.com.ph/feed/', category: 'business' },
+  { name: 'Philstar Business', url: 'https://www.philstar.com/rss/business', category: 'business' },
+  // Regional & Investigative
+  { name: 'SunStar', url: 'https://www.sunstar.com.ph/feeds', category: 'news' },
+  { name: 'Philippine News Agency', url: 'https://www.pna.gov.ph/rss.xml', category: 'news' },
+  { name: 'MindaNews', url: 'https://www.mindanews.com/feed/', category: 'news' },
+  { name: 'Visayan Daily Star', url: 'https://visayandailystar.com/feed/', category: 'news' },
+  { name: 'Panay News', url: 'https://www.panaynews.net/feed/', category: 'news' },
+  { name: 'Tempo', url: 'https://tempo.com.ph/feed/', category: 'news' },
+  { name: 'Daily Tribune', url: 'https://tribune.net.ph/feed/', category: 'news' },
+  { name: 'The Freeman', url: 'https://www.philstar.com/rss/the-freeman', category: 'news' },
 ];
 
 /**
