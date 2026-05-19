@@ -59,8 +59,15 @@ import { AllUtilityAdvisoriesResponse, UtilityType } from '../../core/models/haz
                 @for (item of data()!.water!.scheduledInterruptions; track item.id) {
                   <div class="bg-white rounded-lg shadow p-4 border-l-4 border-blue-400 mb-3">
                     <h4 class="font-medium">{{ item.provider }} — {{ item.area }}</h4>
+                    @if (item.location) {
+                      <p class="text-sm text-gray-600">📍 {{ item.location }}</p>
+                    }
                     <p class="text-sm text-gray-500">{{ item.reason }}</p>
-                    <p class="text-xs text-gray-400 mt-1">{{ item.startDate }} – {{ item.endDate }}</p>
+                    @if (item.schedule) {
+                      <p class="text-xs text-gray-500 mt-1">🕐 {{ item.schedule }}</p>
+                    } @else if (item.startDate) {
+                      <p class="text-xs text-gray-400 mt-1">{{ item.startDate }} – {{ item.endDate }}</p>
+                    }
                   </div>
                 }
               }

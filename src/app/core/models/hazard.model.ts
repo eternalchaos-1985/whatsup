@@ -162,10 +162,13 @@ export interface ScheduledInterruption {
   utilityType: UtilityType;
   provider: string;
   area: string;
-  startDate: string;
-  endDate: string;
+  startDate: string | null;
+  endDate: string | null;
   reason: string;
   source: string;
+  schedule?: string;
+  location?: string;
+  publishedAt?: string;
 }
 
 export interface UtilityAdvisoryResponse {
