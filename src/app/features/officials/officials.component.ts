@@ -417,29 +417,28 @@ import { LGUByLocationResponse, LGUOfficial, Facility, EmergencyContact } from '
             </section>
           }
 
-          <!-- Search Results -->
-          @if (searchResults().length > 0) {
-            <section aria-labelledby="search-heading">
-              <h2 id="search-heading" class="text-lg font-semibold mb-3">🔎 Search Results</h2>
-              <div class="grid md:grid-cols-2 gap-3">
-                @for (official of searchResults(); track official.id) {
-                  <div class="bg-white rounded-lg shadow p-4 flex items-start gap-3">
-                    <div class="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-600 font-bold shrink-0">
-                      {{ official.name.charAt(0) }}
-                    </div>
-                    <div class="flex-1 min-w-0">
-                      <p class="font-medium text-gray-800 truncate">{{ official.name }}</p>
-                      <p class="text-xs text-indigo-600">{{ official.position }} · {{ official.area }}</p>
-                      @if (official.phone) {
-                        <a [href]="'tel:' + official.phone"
-                           class="text-sm text-blue-600 hover:underline">📞 {{ official.phone }}</a>
-                      }
-                    </div>
+        } @else if (searchResults().length > 0) {
+          <!-- Search Results (name/position search, no location match) -->
+          <section aria-labelledby="search-heading">
+            <h2 id="search-heading" class="text-lg font-semibold mb-3">🔎 Search Results</h2>
+            <div class="grid md:grid-cols-2 gap-3">
+              @for (official of searchResults(); track official.id) {
+                <div class="bg-white rounded-lg shadow p-4 flex items-start gap-3">
+                  <div class="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-600 font-bold shrink-0">
+                    {{ official.name.charAt(0) }}
                   </div>
-                }
-              </div>
-            </section>
-          }
+                  <div class="flex-1 min-w-0">
+                    <p class="font-medium text-gray-800 truncate">{{ official.name }}</p>
+                    <p class="text-xs text-indigo-600">{{ official.position }} · {{ official.area }}</p>
+                    @if (official.phone) {
+                      <a [href]="'tel:' + official.phone"
+                         class="text-sm text-blue-600 hover:underline">📞 {{ official.phone }}</a>
+                    }
+                  </div>
+                </div>
+              }
+            </div>
+          </section>
         } @else if (!isLoading()) {
           @if (searchFailed()) {
             <div class="text-center py-12">

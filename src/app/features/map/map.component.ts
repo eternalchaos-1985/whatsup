@@ -574,26 +574,52 @@ export class MapComponent implements OnInit, OnDestroy {
         const group = this.layerGroups['news'];
         group.clearLayers();
         const items: SidePanelItem[] = [];
-        if (loc && articles.length > 0) {
-          L.marker([loc.lat, loc.lng + 0.005], {
+
+        const geotagged = articles.filter(a => a.lat != null && a.lng != null);
+        const ungeotagged = articles.filter(a => a.lat == null || a.lng == null);
+
+        // Place individual markers for geotagged articles
+        for (const a of geotagged) {
+          L.marker([a.lat!, a.lng!], {
             icon: this.createDivIcon('📰', '#8b5cf6'),
-          }).bindPopup(this.newsListPopup(articles.slice(0, 8))).addTo(group);
-        }
-        for (const a of articles) {
+          }).bindPopup(this.newsPopup(a)).addTo(group);
           items.push({
             id: `news-${a.title?.slice(0, 20)}`,
             layer: 'news',
             icon: '📰',
             color: '#8b5cf6',
             title: a.title,
-            subtitle: a.source,
+            subtitle: `${a.source}${a.locationName ? ' · ' + a.locationName : ''}`,
             detail: a.description?.slice(0, 120),
             timestamp: a.publishedAt,
-            lat: loc?.lat,
-            lng: loc ? loc.lng + 0.005 : undefined,
+            lat: a.lat,
+            lng: a.lng,
             url: a.url,
           });
         }
+
+        // Group ungeotagged articles at user location
+        if (loc && ungeotagged.length > 0) {
+          L.marker([loc.lat, loc.lng + 0.005], {
+            icon: this.createDivIcon('📰', '#8b5cf6'),
+          }).bindPopup(this.newsListPopup(ungeotagged.slice(0, 8))).addTo(group);
+          for (const a of ungeotagged) {
+            items.push({
+              id: `news-${a.title?.slice(0, 20)}`,
+              layer: 'news',
+              icon: '📰',
+              color: '#8b5cf6',
+              title: a.title,
+              subtitle: a.source,
+              detail: a.description?.slice(0, 120),
+              timestamp: a.publishedAt,
+              lat: loc.lat,
+              lng: loc.lng + 0.005,
+              url: a.url,
+            });
+          }
+        }
+
         this.layerCounts.update(c => ({ ...c, news: articles.length }));
         this.panelItems.update(prev => [...prev.filter(i => i.layer !== 'news'), ...items]);
         this.loading.set(false);
@@ -819,6 +845,15 @@ export class MapComponent implements OnInit, OnDestroy {
           <div class="text-[10px] text-gray-400">${a.source} · ${new Date(a.publishedAt).toLocaleDateString()}</div>
         </div>`
       ).join('')}
+    </div>`;
+  }
+
+  private newsPopup(article: NewsArticle): string {
+    return `<div class="text-sm max-w-72">
+      <a href="${this.sanitizeUrl(article.url)}" target="_blank" rel="noopener" class="text-blue-700 font-medium hover:underline">${article.title}</a>
+      <div class="text-[10px] text-gray-400 mt-1">${article.source} · ${new Date(article.publishedAt).toLocaleDateString()}</div>
+      ${article.locationName ? `<div class="text-[10px] text-indigo-500 mt-0.5">📍 ${article.locationName}</div>` : ''}
+      ${article.description ? `<div class="text-xs text-gray-600 mt-1">${article.description.slice(0, 150)}</div>` : ''}
     </div>`;
   }
 

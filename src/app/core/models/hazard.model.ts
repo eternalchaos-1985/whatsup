@@ -71,6 +71,9 @@ export interface NewsArticle {
   imageUrl?: string;
   publishedAt: string;
   category: string;
+  lat?: number;
+  lng?: number;
+  locationName?: string;
 }
 
 export interface CommunityEvent {
